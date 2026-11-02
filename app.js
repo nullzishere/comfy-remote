@@ -539,7 +539,7 @@ $("#friend-secret-copy").addEventListener("click", async () => {
 $("#friend-add").addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
-    const r = await api("/api/friends", { json: { name: $("#friend-name").value, limit: $("#friend-limit").value } });
+    const r = await api("/api/friends", { json: { name: $("#friend-name").value, limit: $("#friend-limit").value, password: $("#friend-pw").value } });
     e.target.reset(); showSecret(r.friend.name, r.password);
   } catch (err) { toast(err.message); }
 });
