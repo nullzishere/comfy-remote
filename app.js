@@ -308,12 +308,13 @@ const PICKS = {
   Light: ["day", "sunset", "night", "night sky", "rain", "snow", "backlighting", "sunlight", "neon lights", "light particles"],
 };
 const QUALITY_TAGS = "masterpiece, best quality, amazing quality, very aesthetic, absurdres";
+const esc = (t) => t.replace(/\\?([()])/g, "\\$1");      // ComfyUI reads (x) as weight: "emilia \(re:zero\)"
 const splitTags = (s) => (s || "").split(",").map((t) => t.trim()).filter(Boolean);
 function tagger(ta) {
-  const has = (t) => splitTags(ta.value).some((x) => x.toLowerCase() === t);
+  const has = (t) => splitTags(ta.value).some((x) => x.toLowerCase() === esc(t));
   const write = (list) => { ta.value = list.join(", "); ta.dispatchEvent(new Event("input")); refresh(); };
-  const toggle = (t) => write(has(t) ? splitTags(ta.value).filter((x) => x.toLowerCase() !== t) : [...splitTags(ta.value), t]);
-  const addTags = (list) => { const cur = splitTags(ta.value), low = cur.map((x) => x.toLowerCase()); write([...cur, ...list.filter((t) => !low.includes(t))]); };
+  const toggle = (t) => write(has(t) ? splitTags(ta.value).filter((x) => x.toLowerCase() !== esc(t)) : [...splitTags(ta.value), esc(t)]);
+  const addTags = (list) => { const cur = splitTags(ta.value), low = cur.map((x) => x.toLowerCase()); write([...cur, ...list.map(esc).filter((t) => !low.includes(t))]); };
 
   // 1 · plain words -> tags
   const words = h("textarea", { rows: 2, maxlength: 600, placeholder: "a girl with silver hair on a snowy rooftop at night, looking sad", "aria-label": "Describe it in plain words" });
@@ -338,7 +339,7 @@ function tagger(ta) {
         h("p", { class: "hint" }, "Tap a tag to leave it out. Dashed ones aren't standard tags."), chips,
         h("label", { class: "tg-q" }, quality, h("span", {}, "Start with quality tags")),
         h("div", { class: "row-btns" },
-          h("button", { class: "btn primary", type: "button", onclick: () => { const keep = r.tags.map((x) => x.tag).filter((t) => picked.includes(t)); write([...(quality.checked ? splitTags(QUALITY_TAGS) : []), ...keep]); write(splitTags(editTags(ta.value, [], activeTriggers()))); toast("Prompt replaced with tags"); } }, "Use as my prompt"),
+          h("button", { class: "btn primary", type: "button", onclick: () => { const keep = r.tags.map((x) => x.tag).filter((t) => picked.includes(t)).map(esc); write([...(quality.checked ? splitTags(QUALITY_TAGS) : []), ...keep]); write(splitTags(editTags(ta.value, [], activeTriggers()))); toast("Prompt replaced with tags"); } }, "Use as my prompt"),
           h("button", { class: "btn", type: "button", onclick: () => { addTags(r.tags.map((x) => x.tag).filter((t) => picked.includes(t))); toast("Tags added"); } }, "Add to my prompt")));
       result.hidden = false;
     } catch (e) { toast(e.message); }
@@ -416,7 +417,9 @@ function ratingRow(ta) {
 }
 function loraWants(x) {
   const info = x.on && (S.workflows[wf].lora_tags || {})[x.name];
-  return info ? [...info.always, ...Object.values(x.pick || {}).flat()] : [];
+  if (!info) return [];
+  const chosen = info.groups.flatMap((g) => g.options.filter((o) => ((x.pick || {})[g.label] || []).includes(o.label)).flatMap((o) => o.tags));
+  return [...new Set([...info.always, ...chosen])];
 }
 function activeTriggers() {
   return S.workflows[wf].fields.filter((f) => f.type === "lora").flatMap((f) => loraWants(values[wf][f.id] || {}));
@@ -437,10 +440,10 @@ function loraTriggers(id, x) {
     setLora(id, { pick: { ...pick, [g.label]: next } });
   };
   return h("div", { class: "lora-trig" },
-    info.always.length ? h("p", { class: "hint" }, "Adds to your prompt: ", h("b", {}, info.always.join(", "))) : null,
+    info.always.length ? h("p", { class: "hint" }, "Adds to your prompt: ", h("b", {}, info.always.join(", ").replace(/\\/g, ""))) : null,
     ...info.groups.map((g) => h("div", { class: "tg-lane" }, h("b", {}, g.label),
-      g.one ? h("button", { type: "button", class: "tg-chip", "aria-pressed": String(!(pick[g.label] || []).length), onclick: () => choose(g, null) }, "Any") : null,
-      ...g.tags.map((t) => h("button", { type: "button", class: "tg-chip", "aria-pressed": String((pick[g.label] || []).includes(t)), onclick: () => choose(g, t) }, t)))));
+      g.one ? h("button", { type: "button", class: "tg-chip", "aria-pressed": String(!(pick[g.label] || []).length), onclick: () => choose(g, null) }, "Default") : null,
+      ...g.options.map((o) => h("button", { type: "button", class: "tg-chip", title: o.tags.join(", ").replace(/\\/g, ""), "aria-pressed": String((pick[g.label] || []).includes(o.label)), onclick: () => choose(g, o.label) }, o.label)))));
 }
 const fmtCount = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(n);
 const fmt = (x) => { const n = Number(x); return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0$/, ""); };
