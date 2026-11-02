@@ -95,7 +95,8 @@ let wf = store.get("wf", "anime");
 const values = {};           // per workflow
 let state = { online: false, jobs: [] };
 const seenDone = new Set();
-let firstPoll = true;            // jobs that were already done when the page opened don't buzz
+let firstPoll = true;
+let ME = { name: "", role: "owner" };            // jobs that were already done when the page opened don't buzz
 
 function defaults(w) { const o = {}; for (const f of S.workflows[w].fields) o[f.id] = structuredClone(f.default); return o; }
 function loadValues(w) {
@@ -307,6 +308,16 @@ function renderStatus(err = false) {
   $("#offline").hidden = err || state.online;
   $("#offline-sub").textContent = state.starting ? "Starting up — this takes about a minute." : "Start it to generate images.";
   $("#start-comfy").disabled = !!state.starting;
+  $("#start-comfy").hidden = ME.role !== "owner";
+  if (!state.online && ME.role !== "owner") $("#offline-sub").textContent = "Ask the owner to start it.";
+  const q = $("#quota"), me = state.me || {};
+  if (q) {
+    if (me.role === "friend" && me.limit) {
+      const left = Math.max(0, me.limit - (me.used || 0));
+      q.textContent = left ? `${left} of ${me.limit} images left today` : `You've used all ${me.limit} images for today. More at midnight.`;
+      q.className = "quota" + (left ? "" : " out");
+    } else q.textContent = "";
+  }
   $("#settings-status").textContent = err ? "Can't reach the app." : state.online ? (state.busy ? `ComfyUI is running · ${state.busy} job(s) in line.` : "ComfyUI is running and idle.") : state.starting ? "ComfyUI is starting…" : "ComfyUI is not running.";
 }
 
@@ -352,7 +363,7 @@ function updateJobCard(card, j) {
   if (j.status === "queued") t = j.ahead ? `Waiting · ${j.ahead} ahead` : "Starting…";
   if (j.status === "running") t = `Generating · ${Math.round((j.progress || 0) * 100)}%`;
   card._title.textContent = t;
-  card._time.textContent = timeAgo(j.created);
+  card._time.replaceChildren(j.by ? h("span", { class: "by" }, j.by + " · ") : "", timeAgo(j.created));
   if (j.status === "error") card._sum.textContent = j.error || "Something went wrong.";
   const active = j.status === "queued" || j.status === "running";
   card._bar.hidden = !active;
@@ -367,7 +378,7 @@ function updateJobCard(card, j) {
   } else if (j.status === "done" && j.images && card._doneFor !== j.id) {
     card._doneFor = j.id;
     card._thumb.replaceChildren(authImg(`/api/image/${j.id}/0?thumb=1`));
-    card._thumb.onclick = () => openViewer([{ id: j.id, n: j.images, summary: j.summary, workflow: j.workflow }], 0);
+    card._thumb.onclick = () => openViewer([{ id: j.id, n: j.images, summary: j.summary, workflow: j.workflow, by: j.by }], 0);
   } else if (active && !$("img", card._thumb)) {
     card._thumb.replaceChildren(h("span", { class: "slot" }, h("span", { class: "spin" })));
     $(".slot", card._thumb).style.cssText = "border:0;width:100%;height:100%";
@@ -428,7 +439,7 @@ function show() {
   $("#viewer-img").removeAttribute("src");
   authSrc($("#viewer-img"), `/api/image/${it.id}/${it.idx}`);
   $("#viewer-download").href = ON_PAGES ? "#" : `/api/image/${it.id}/${it.idx}?download=1`;
-  $("#viewer-caption").textContent = it.summary || "";
+  $("#viewer-caption").textContent = (it.by ? `by ${it.by} · ` : "") + (it.summary || "");
   $("#viewer-count").textContent = V.list.length > 1 ? `${V.i + 1} / ${V.list.length}` : "";
   $("#viewer-prev").hidden = V.i === 0; $("#viewer-next").hidden = V.i >= V.list.length - 1;
   $("#viewer-reuse").hidden = !it.values;
@@ -478,8 +489,55 @@ $("#viewer-use").addEventListener("click", async () => {
 function closeSheets() { $("#gallery").hidden = true; $("#settings").hidden = true; }
 function closeAll() { closeSheets(); $("#viewer").hidden = true; }
 document.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", () => { if (b.closest(".viewer")) $("#viewer").hidden = true; else closeSheets(); }));
-$("#open-settings").addEventListener("click", () => { $("#settings").hidden = false; });
-$("#status").addEventListener("click", () => { $("#settings").hidden = false; });
+function openSettings() { $("#settings").hidden = false; if (ME.role === "owner") loadFriends(); }
+$("#open-settings").addEventListener("click", openSettings);
+$("#status").addEventListener("click", openSettings);
+
+/* ------------------------------------------------------------ friends (owner) */
+async function loadFriends() {
+  try { renderFriends((await api("/api/friends")).friends); } catch (e) { toast(e.message); }
+}
+function renderFriends(list) {
+  const box = $("#friends-list");
+  box.replaceChildren(...list.map((f) => {
+    const lim = h("input", { class: "input", type: "number", min: "1", max: "1000", inputmode: "numeric", placeholder: "No limit", value: f.limit ?? "", "aria-label": `Daily limit for ${f.name}` });
+    const save = async () => {
+      try { await api(`/api/friends/${f.id}/update`, { json: { limit: lim.value } }); toast("Limit saved"); loadFriends(); } catch (e) { toast(e.message); }
+    };
+    lim.addEventListener("change", save);
+    return h("div", { class: "friend" },
+      h("div", { class: "friend-top" }, h("b", {}, f.name),
+        h("small", {}, f.limit ? `${f.used_today}/${f.limit} today` : `${f.used_today} today · no limit`),
+        h("small", {}, f.seen ? "· active " + timeAgo(f.seen) : "· hasn't made anything yet")),
+      h("div", { class: "friend-actions" }, h("span", { class: "muted", style: "font-size:13px" }, "Images/day"), lim,
+        h("button", { class: "btn", type: "button", onclick: async () => {
+          if (!confirm(`Make a new password for ${f.name}? Their old one stops working.`)) return;
+          try { const r = await api(`/api/friends/${f.id}/reset`, { json: {} }); showSecret(f.name, r.password); } catch (e) { toast(e.message); }
+        } }, "New password"),
+        h("button", { class: "btn danger", type: "button", onclick: async () => {
+          if (!confirm(`Remove ${f.name}? They'll be signed out right away. Their images stay on your PC.`)) return;
+          try { await api(`/api/friends/${f.id}/remove`, { json: {} }); toast(`${f.name} removed`); loadFriends(); } catch (e) { toast(e.message); }
+        } }, "Remove")));
+  }));
+}
+function showSecret(name, pw) {
+  $("#friend-secret-title").textContent = `Password for ${name}:`;
+  $("#friend-secret-pw").textContent = pw;
+  $("#friend-secret").hidden = false;
+  $("#friend-secret").scrollIntoView({ behavior: "smooth", block: "center" });
+  loadFriends();
+}
+$("#friend-secret-copy").addEventListener("click", async () => {
+  const text = `${location.origin}${location.pathname}\nPassword: ${$("#friend-secret-pw").textContent}`;
+  try { await navigator.clipboard.writeText(text); toast("Link and password copied"); } catch { toast("Copy didn't work. Select the password and copy it."); }
+});
+$("#friend-add").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    const r = await api("/api/friends", { json: { name: $("#friend-name").value, limit: $("#friend-limit").value } });
+    e.target.reset(); showSecret(r.friend.name, r.password);
+  } catch (err) { toast(err.message); }
+});
 async function startComfy() {
   try { await api("/api/comfy/start", { json: {} }); toast("Starting ComfyUI — about a minute"); poll(); } catch (e) { toast(e.message); }
 }
@@ -510,6 +568,9 @@ async function boot() {
   await loadApiBase();
   const me = await api("/api/me");
   if (!me.logged_in) return showLogin();
+  ME = { name: me.name, role: me.role };
+  document.body.classList.toggle("friend", ME.role !== "owner");
+  $("#signed-in").textContent = ME.role === "owner" ? "Signed in as the owner" : `Signed in as ${ME.name}`;
   S = await api("/api/schema");
   if (!S.workflows[wf]) wf = Object.keys(S.workflows)[0];
   for (const w of Object.keys(S.workflows)) values[w] = loadValues(w);

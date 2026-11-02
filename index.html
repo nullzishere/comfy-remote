@@ -67,6 +67,7 @@
           <svg viewBox="0 0 24 24"><path d="M12 2l2.4 6.3L21 9l-5 4.4L17.5 21 12 17.3 6.5 21 8 13.4 3 9l6.6-.7z"/></svg>
           <span>Generate</span>
         </button>
+        <p class="quota" id="quota"></p>
       </div>
     </section>
     <section class="results">
@@ -86,12 +87,28 @@
 <div class="sheet" id="settings" hidden>
   <div class="sheet-head"><h2>Settings</h2><button class="icon-btn close" type="button" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
   <div class="sheet-body">
+    <p class="muted signed-in" id="signed-in"></p>
     <div class="card">
       <h3>Your PC</h3>
       <p class="muted" id="settings-status"></p>
-      <div class="row-btns">
+      <div class="row-btns owner-only">
         <button class="btn" id="settings-start" type="button">Start ComfyUI</button>
         <button class="btn" id="settings-free" type="button">Free GPU memory</button>
+      </div>
+    </div>
+    <div class="card owner-only" id="friends-card">
+      <h3>Friends</h3>
+      <p class="muted">Give friends their own password. They only see their own images, run one at a time, and can't change anything here. Your images always go first in the queue.</p>
+      <div id="friends-list" class="friends"></div>
+      <form id="friend-add" class="friend-add">
+        <input class="input" id="friend-name" placeholder="Friend's name" maxlength="32" autocomplete="off" required>
+        <input class="input" id="friend-limit" type="number" min="1" max="1000" inputmode="numeric" placeholder="Images/day (blank = no limit)">
+        <button class="btn primary" type="submit">Add friend</button>
+      </form>
+      <div class="secret" id="friend-secret" hidden>
+        <p id="friend-secret-title"></p>
+        <div class="secret-row"><code id="friend-secret-pw"></code><button class="btn" id="friend-secret-copy" type="button">Copy</button></div>
+        <p class="muted">Send them this password and the link. It won't be shown again, but you can always make a new one.</p>
       </div>
     </div>
     <form class="card" id="pw-form">

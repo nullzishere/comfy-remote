@@ -272,3 +272,26 @@ input:checked + .switch::after { transform: translateX(20px); }
   font-size: 14px; max-width: calc(100% - 32px); animation: up .2s ease-out;
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* accounts */
+.signed-in { margin: 0 0 -4px; font-size: 14px; }
+body.friend .owner-only { display: none !important; }
+.quota { margin: 0; font-size: 13px; color: var(--muted); text-align: center; }
+.quota:empty { display: none; }
+.quota.out { color: var(--bad); }
+.by { color: var(--accent); font-weight: 600; }
+.friends { display: grid; gap: 8px; }
+.friends:empty { display: none; }
+.friend { display: grid; gap: 8px; padding: 12px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line); }
+.friend-top { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.friend-top b { font-size: 15px; }
+.friend-top small { color: var(--muted); font-size: 12px; }
+.friend-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.friend-actions .btn { min-height: 36px; padding: 0 12px; font-size: 13px; border-radius: 10px; }
+.friend-actions .input { width: 110px; min-height: 36px; padding: 4px 10px; font-size: 14px; }
+.friend-add { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 520px) { .friend-add { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; } }
+.secret { display: grid; gap: 8px; padding: 12px; border-radius: 12px; border: 1px solid var(--accent); background: rgba(139,123,255,.08); }
+.secret p { margin: 0; }
+.secret-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.secret code { font: 600 17px/1.3 ui-monospace, Consolas, monospace; letter-spacing: .02em; word-break: break-all; }
