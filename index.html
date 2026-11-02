@@ -40,10 +40,22 @@
   </div>
 </div>
 
+<div id="welcome" class="login" hidden>
+  <div class="login-card welcome-card">
+    <img src="icon.svg" alt="" class="login-logo">
+    <h1 id="welcome-title">Welcome</h1>
+    <p class="muted">How much of the studio do you want to see? You can change this anytime in Settings.</p>
+    <div class="choices levels" id="welcome-levels" role="radiogroup"></div>
+  </div>
+</div>
+
 <div id="app" hidden>
   <header class="topbar">
     <div class="brand"><img src="icon.svg" alt=""><span>comfy/remote</span></div>
     <button class="status" id="status" type="button"><i></i><span>Connecting…</span></button>
+    <button class="icon-btn owner-only" id="open-admin" type="button" aria-label="Admin panel">
+      <svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+    </button>
     <button class="icon-btn" id="open-gallery" type="button" aria-label="Gallery">
       <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>
     </button>
@@ -71,6 +83,7 @@
       </div>
     </section>
     <section class="results">
+      <div class="main-view">
       <div class="stage" id="stage" hidden>
         <button class="stage-in" id="stage-in" type="button" aria-label="Your latest image">
           <canvas id="stage-cv"></canvas>
@@ -79,10 +92,13 @@
         </button>
       </div>
       <p class="stage-cap" id="stage-cap" hidden></p>
+      </div>
+      <div class="side">
       <h2 class="section-title">Queue</h2>
       <div id="jobs" class="jobs"><p class="empty muted">Your images will show up here.</p></div>
       <div class="recent-head"><h2 class="section-title">Recent</h2><button class="link" id="see-all" type="button">See all</button></div>
       <div id="recent" class="grid"></div>
+      </div>
     </section>
   </div>
 </div>
@@ -92,10 +108,22 @@
   <div class="sheet-body"><div id="gallery-grid" class="grid"></div><button class="btn ghost wide" id="gallery-more" type="button" hidden>Load more</button></div>
 </div>
 
+<div class="sheet" id="admin" hidden>
+  <div class="sheet-head"><h2>Admin</h2><span class="muted admin-updated" id="admin-updated"></span><button class="icon-btn close" type="button" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+  <div class="sheet-body" id="admin-body"><p class="muted">Loading…</p></div>
+</div>
+
 <div class="sheet" id="settings" hidden>
   <div class="sheet-head"><h2>Settings</h2><button class="icon-btn close" type="button" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
   <div class="sheet-body">
     <p class="muted signed-in" id="signed-in"></p>
+    <div class="card" id="prefs-card">
+      <h3>Your setup</h3>
+      <span class="field-label">What you see</span>
+      <div class="choices levels" id="level-choices" role="radiogroup"></div>
+      <span class="field-label">Colours</span>
+      <div class="themes" id="theme-choices" role="radiogroup"></div>
+    </div>
     <div class="card">
       <h3>Your PC</h3>
       <p class="muted" id="settings-status"></p>
@@ -106,11 +134,11 @@
     </div>
     <div class="card owner-only" id="friends-card">
       <h3>Friends</h3>
-      <p class="muted">Give friends their own password. They only see their own images, run one at a time, and can't change anything here. Your images always go first in the queue.</p>
+      <p class="muted">Give friends their own password. They only see their own images and can't change anything here. Your images always go first in the queue. Set how much each one can make below (blank = no limit).</p>
       <div id="friends-list" class="friends"></div>
       <form id="friend-add" class="friend-add">
         <input class="input" id="friend-name" placeholder="Friend's name" maxlength="32" autocomplete="off" required>
-        <input class="input" id="friend-limit" type="number" min="1" max="1000" inputmode="numeric" placeholder="Images/day (blank = no limit)">
+        <div class="limits" id="friend-add-limits"></div>
         <input class="input" id="friend-pw" type="text" minlength="8" autocomplete="off" placeholder="Password (blank = random, safest)">
         <button class="btn primary" type="submit">Add friend</button>
       </form>

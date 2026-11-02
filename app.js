@@ -24,6 +24,19 @@ const store = {
   set(k, v) { try { localStorage.setItem("cr." + k, JSON.stringify(v)); } catch { /* private mode */ } },
 };
 
+// Colour themes (app.css :root[data-theme]). The account's choice is saved on the PC; this device remembers the last
+// one so the page doesn't flash the default colours while it loads. [id, name, background, accent, accent 2]
+const THEMES = [["chrome", "Chrome", "#0b0a12", "#8b5cff", "#ff5cae"], ["dark", "Dark", "#0e0e10", "#e4e4e7", "#a1a1aa"],
+  ["light", "Light", "#f5f4fa", "#7446f5", "#e2407f"], ["midnight", "Midnight blue", "#060a18", "#4d7cff", "#35d4ff"],
+  ["terminal", "Terminal", "#040704", "#39ff6a", "#b4ff3a"], ["minion", "Minion", "#0b2556", "#ffd60a", "#ffe866"]];
+function applyTheme(id) {
+  const t = THEMES.find((x) => x[0] === id) || THEMES[0];
+  document.documentElement.dataset.theme = t[0];
+  document.querySelector('meta[name="theme-color"]').setAttribute("content", t[2]);
+  store.set("theme", t[0]);
+}
+applyTheme(store.get("theme", "chrome"));
+
 // Opened from GitHub Pages, the page talks to the PC's tunnel address (from config.json, kept current by the PC)
 // and signs requests with a token; opened from the tunnel link itself, it's same-origin with a cookie.
 const ON_PAGES = location.hostname.endsWith("github.io");
@@ -98,7 +111,59 @@ const seenDone = new Set();
 let firstPoll = true;
 const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const ease = (t) => 1 - Math.pow(1 - t, 3);
-let ME = { name: "", role: "owner" };            // jobs that were already done when the page opened don't buzz
+let ME = { name: "", role: "owner", prefs: { level: "dev", theme: "chrome" } };
+
+/* How much of the app an account sees (picked on a friend's first visit, changeable in Settings):
+   normal = guided prompt + simple pickers, power = everything but the expert knobs, dev = every knob. */
+const LEVELS = {
+  normal: { title: "Simple", hint: "Describe what you want and we help write the prompt. Just the essentials." },
+  power: { title: "Power", hint: "LoRAs, reference pictures, quality and add-ons. Expert knobs stay hidden." },
+  dev: { title: "Dev", hint: "Every knob: models, samplers, schedulers, steps, CFG and more." },
+};
+const HIDE_GROUPS = { normal: new Set(["refs", "loras", "sampling", "refine", "detail", "control"]),
+  power: new Set(["sampling", "refine", "detail", "control"]), dev: new Set() };
+const level = () => (ME.prefs && ME.prefs.level) || "dev";
+const SIMPLE_SLOTS = [["character", "Character", "Draw a known character"], ["style", "Art style", "Draw it in a show's or artist's style"]];
+const guideStep = (n, title, hint) => h("div", { class: "guide-step" }, h("span", { class: "step-num" }, String(n)), h("div", {}, h("b", {}, title), h("p", { class: "hint" }, hint)));
+
+function simpleLoras() {                              // Simple level: the first two LoRA slots as Character / Art style pickers
+  const w = S.workflows[wf], kinds = w.lora_kinds || {}, labels = w.lora_labels || {};
+  const slots = w.fields.filter((f) => f.type === "lora");
+  return SIMPLE_SLOTS.map(([kind, title, hint], i) => {
+    const f = slots[i]; if (!f) return null;
+    const names = (f.options || w.loras || []).filter((n) => kinds[n] === kind).sort((a, b) => (labels[a] || a).localeCompare(labels[b] || b));
+    if (!names.length) return null;
+    const x = values[wf][f.id] || {}, cur = x.on && names.includes(x.name) ? x.name : null;
+    const chip = (label, on, onclick) => h("button", { class: "tg-chip", type: "button", role: "radio", "aria-checked": String(on), onclick }, label);
+    return h("div", { class: "field" }, h("span", { class: "field-label" }, title), h("p", { class: "hint" }, hint),
+      h("div", { class: "chips wrap", role: "radiogroup" }, chip("None", !cur, () => setLora(f.id, { on: false })),
+        ...names.map((n) => chip(labels[n] || n, cur === n, () => setLora(f.id, cur === n ? { on: false } : { on: true, name: n, strength: 1, pick: {} })))),
+      cur ? loraTriggers(f.id, x) : null);
+  }).filter(Boolean);
+}
+
+/* After switching to a level that hides things: put hidden settings back to the workflow's defaults (so nothing you
+   can't see changes your images), switch off LoRAs it can't show, then let the add-ons re-apply their settings. */
+function tidyForLevel() {
+  const hide = HIDE_GROUPS[level()], keep = wf;
+  for (const w of Object.keys(S.workflows)) {
+    wf = w;
+    const d = defaults(w), v = values[w], fields = S.workflows[w].fields, kinds = S.workflows[w].lora_kinds || {};
+    const slots = fields.filter((f) => f.type === "lora");
+    for (const f of fields) {
+      if (!hide.has(f.group)) continue;
+      if (f.type === "lora") {
+        const x = v[f.id] || {}, i = slots.indexOf(f);
+        const simpleOk = level() === "normal" && i < SIMPLE_SLOTS.length && kinds[x.name] === SIMPLE_SLOTS[i][0];
+        if (x.on && !simpleOk) { v.prompt = editTags(v.prompt, x.added || [], []); v[f.id] = { ...x, on: false, added: [] }; }
+      } else if (f.type !== "image" && f.type !== "images" || level() === "normal") v[f.id] = structuredClone(d[f.id]);
+    }
+    for (const f of fields) if (f.id === "speed" || (f.group === "addons" && f.type === "choice")) applyAddons(f);
+    saveValues();
+  }
+  wf = keep;
+  store.set("tidied", level());
+}
 
 function defaults(w) { const o = {}; for (const f of S.workflows[w].fields) o[f.id] = structuredClone(f.default); return o; }
 function loadValues(w) {
@@ -142,9 +207,14 @@ function renderForm() {
     if (!visible(f, v)) continue;
     (groups[f.group] = groups[f.group] || []).push(f);
   }
+  const hide = HIDE_GROUPS[level()];
   for (const [g, title] of Object.entries(S.groups)) {
-    const fields = groups[g]; if (!fields) continue;
+    const fields = groups[g]; if (!fields || hide.has(g)) continue;
     const els = fields.map((f) => fieldEl(f, v));
+    if (g === "main" && level() === "normal") {        // Character / Art style pickers go right under the prompt
+      const at = fields.findIndex((f) => f.id === "prompt");
+      els.splice(at < 0 ? els.length : at + 1, 0, ...simpleLoras());
+    }
     if (!title) { form.append(...els); continue; }
     const active = activeCount(g, fields, v);
     const det = h("details", { class: "group", "data-group": g, open: open.has(g) || store.get("open." + wf + "." + g, false) },
@@ -153,7 +223,7 @@ function renderForm() {
     det.addEventListener("toggle", () => store.set("open." + wf + "." + g, det.open));
     form.append(det);
   }
-  form.append(h("button", { class: "btn ghost", type: "button", onclick: () => { values[wf] = { ...defaults(wf), ...pickUploads(values[wf]) }; saveValues(); renderForm(); toast("Settings reset"); } }, "Reset all settings to your workflow's defaults"));
+  form.append(h("button", { class: "btn ghost", type: "button", onclick: () => { values[wf] = { ...defaults(wf), ...pickUploads(values[wf]) }; saveValues(); if (level() !== "dev") tidyForLevel(); renderForm(); toast("Settings reset"); } }, level() === "dev" ? "Reset all settings to your workflow's defaults" : "Start over with the default settings"));
 }
 function pickUploads(v) { const o = {}; for (const f of S.workflows[wf].fields) if (f.type === "image" || f.type === "images") o[f.id] = v[f.id]; return o; }
 function activeCount(g, fields, v) {
@@ -229,6 +299,14 @@ function fieldEl(f, v) {
       const counter = h("span", { class: "counter" }, "");
       const upd = () => { counter.textContent = ta.value.length > f.max * 0.8 ? `${ta.value.length}/${f.max}` : ""; };
       ta.addEventListener("input", () => { set(f.id, ta.value); upd(); }); upd();
+      if (wf === "anime" && f.id === "prompt" && level() === "normal") {   // Simple: plain words first, then the tag box
+        const [step1, more] = tagger(ta, true);
+        ta.placeholder = "Your tags land here, e.g. 1girl, long hair, red eyes, night, rain";
+        return h("div", { class: "field guided" },
+          guideStep(1, "Describe your picture", "Write it the way you'd say it. We'll turn it into tags, the words the Anime model understands."), step1,
+          guideStep(2, "Your prompt", "Tags separated by commas. Edit them, add your own, or tap more below."),
+          h("div", { class: "textarea-wrap" }, ta, counter), ratingRow(ta), more);
+      }
       const el = wrap(h("div", { class: "textarea-wrap" }, ta, counter));
       if (wf === "anime" && f.id === "prompt") el.append(ratingRow(ta), tagger(ta));   // Illustrious wants Danbooru tags
       return el;
@@ -312,8 +390,8 @@ const PICKS = {
 const QUALITY_TAGS = "masterpiece, best quality, amazing quality, very aesthetic, absurdres";
 const esc = (t) => t.replace(/\\?([()])/g, "\\$1");      // ComfyUI reads (x) as weight: "emilia \(re:zero\)"
 const splitTags = (s) => (s || "").split(",").map((t) => t.trim()).filter(Boolean);
-function tagger(ta) {
-  const has = (t) => splitTags(ta.value).some((x) => x.toLowerCase() === esc(t));
+function tagger(ta, guided = false) {
+  const has =(t) => splitTags(ta.value).some((x) => x.toLowerCase() === esc(t));
   const write = (list) => { ta.value = list.join(", "); ta.dispatchEvent(new Event("input")); refresh(); };
   const toggle = (t) => write(has(t) ? splitTags(ta.value).filter((x) => x.toLowerCase() !== esc(t)) : [...splitTags(ta.value), esc(t)]);
   const addTags = (list) => { const cur = splitTags(ta.value), low = cur.map((x) => x.toLowerCase()); write([...cur, ...list.map(esc).filter((t) => !low.includes(t))]); };
@@ -341,7 +419,8 @@ function tagger(ta) {
         h("p", { class: "hint" }, "Tap a tag to leave it out. Dashed ones aren't standard tags."), chips,
         h("label", { class: "tg-q" }, quality, h("span", {}, "Start with quality tags")),
         h("div", { class: "row-btns" },
-          h("button", { class: "btn primary", type: "button", onclick: () => { const keep = r.tags.map((x) => x.tag).filter((t) => picked.includes(t)).map(esc); write([...(quality.checked ? splitTags(QUALITY_TAGS) : []), ...keep]); write(splitTags(editTags(ta.value, [], activeTriggers()))); toast("Prompt replaced with tags"); } }, "Use as my prompt"),
+          h("button", { class: "btn primary", type: "button", onclick: () => { const keep = r.tags.map((x) => x.tag).filter((t) => picked.includes(t)).map(esc); write([...(quality.checked ? splitTags(QUALITY_TAGS) : []), ...keep]); write(splitTags(editTags(ta.value, [], activeTriggers()))); toast("Prompt replaced with tags");
+            if (guided) { ta.scrollIntoView({ behavior: REDUCED ? "auto" : "smooth", block: "center" }); ta.classList.remove("flash"); void ta.offsetWidth; ta.classList.add("flash"); } } }, "Use as my prompt"),
           h("button", { class: "btn", type: "button", onclick: () => { addTags(r.tags.map((x) => x.tag).filter((t) => picked.includes(t))); toast("Tags added"); } }, "Add to my prompt")));
       result.hidden = false;
     } catch (e) { toast(e.message); }
@@ -376,6 +455,13 @@ function tagger(ta) {
   function refresh() { pickBtns.forEach(([t, b]) => b.setAttribute("aria-pressed", String(has(t)))); }
   ta.addEventListener("input", refresh); refresh();
 
+  if (guided) {                                       // Simple level: step 1 is its own card, the rest tucks under the prompt
+    return [h("div", { class: "tg-sec guide-box" }, words, convert, result),
+      h("details", { class: "tagger" }, h("summary", {}, h("span", { class: "tg-spark" }, "✦"), "Add more tags", h("small", {}, "search or tap")),
+        h("div", { class: "tg-body" },
+          h("div", { class: "tg-sec" }, h("span", { class: "field-label" }, "Find a tag"), search, sugg),
+          h("div", { class: "tg-sec" }, h("span", { class: "field-label" }, "Quick picks"), picks)))];
+  }
   const det = h("details", { class: "tagger", open: store.get("tagger.open", false) },
     h("summary", {}, h("span", { class: "tg-spark" }, "✦"), "Prompt helper", h("small", {}, "write normally or tap tags")),
     h("div", { class: "tg-body" },
@@ -517,11 +603,18 @@ function renderStatus(err = false) {
   if (!state.online && ME.role !== "owner") $("#offline-sub").textContent = "Ask the owner to start it.";
   const q = $("#quota"), me = state.me || {};
   if (q) {
+    const parts = [];
+    let out = false;
     if (me.role === "friend" && me.limit) {
-      const left = Math.max(0, me.limit - (me.used || 0));
-      q.textContent = left ? `${left} of ${me.limit} images left today` : `You've used all ${me.limit} images for today. More at midnight.`;
-      q.className = "quota" + (left ? "" : " out");
-    } else q.textContent = "";
+      const left = Math.max(0, me.limit - (me.used || 0)); out ||= !left;
+      parts.push(left ? `${left} of ${me.limit} left today` : `All ${me.limit} used today, more at midnight`);
+    }
+    if (me.role === "friend" && me.hourly) {
+      const left = Math.max(0, me.hourly - (me.used_hour || 0)); out ||= !left;
+      parts.push(left ? `${left} of ${me.hourly} left this hour` : `Hourly limit reached, try again soon`);
+    }
+    q.textContent = parts.join(" · ");
+    q.className = "quota" + (out ? " out" : "");
   }
   $("#settings-status").textContent = err ? "Can't reach the app." : state.online ? (state.busy ? `ComfyUI is running · ${state.busy} job(s) in line.` : "ComfyUI is running and idle.") : state.starting ? "ComfyUI is starting…" : "ComfyUI is not running.";
 }
@@ -774,7 +867,7 @@ $("#viewer-use").addEventListener("click", async () => {
 });
 
 /* ------------------------------------------------------------ sheets & settings */
-function closeSheets() { $("#gallery").hidden = true; $("#settings").hidden = true; }
+function closeSheets() { $("#gallery").hidden = true; $("#settings").hidden = true; $("#admin").hidden = true; clearTimeout(adminTimer); }
 function closeAll() { closeSheets(); $("#viewer").hidden = true; }
 document.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", () => { if (b.closest(".viewer")) $("#viewer").hidden = true; else closeSheets(); }));
 function openSettings() { $("#settings").hidden = false; if (ME.role === "owner") loadFriends(); }
@@ -785,19 +878,38 @@ $("#status").addEventListener("click", openSettings);
 async function loadFriends() {
   try { renderFriends((await api("/api/friends")).friends); } catch (e) { toast(e.message); }
 }
+// Per-friend limits: [field, label, max, what blank means]
+const LIMIT_UI = [["limit", "Images / day", 1000, "No limit"], ["hourly", "Images / hour", 500, "No limit"],
+  ["concurrent", "Jobs at once", 4, "1"], ["per_run", "Images / run", 4, "4"]];
+function limitInputs(f, onChange) {
+  const inputs = {};
+  const box = h("div", { class: "limits" }, ...LIMIT_UI.map(([k, label, max, blank]) => {
+    inputs[k] = h("input", { class: "input", type: "number", min: "1", max: String(max), inputmode: "numeric", placeholder: blank,
+      value: f && f[k] != null && !(k === "concurrent" && f[k] === 1) && !(k === "per_run" && f[k] === 4) ? f[k] : "", "aria-label": label });
+    if (onChange) inputs[k].addEventListener("change", onChange);
+    return h("label", { class: "limit" }, h("small", {}, label), inputs[k]);
+  }));
+  box.read = () => Object.fromEntries(LIMIT_UI.map(([k]) => [k, inputs[k].value]));
+  return box;
+}
+const addLimits = limitInputs(null);
+$("#friend-add-limits").replaceWith(addLimits);
+function friendUsage(f) {
+  const of = (used, max) => (max ? `${used}/${max}` : `${used}`);
+  return `${of(f.used_today, f.limit)} today · ${of(f.used_hour, f.hourly)} this hour · ${f.concurrent} at once · up to ${f.per_run} per run`;
+}
 function renderFriends(list) {
   const box = $("#friends-list");
   box.replaceChildren(...list.map((f) => {
-    const lim = h("input", { class: "input", type: "number", min: "1", max: "1000", inputmode: "numeric", placeholder: "No limit", value: f.limit ?? "", "aria-label": `Daily limit for ${f.name}` });
-    const save = async () => {
-      try { await api(`/api/friends/${f.id}/update`, { json: { limit: lim.value } }); toast("Limit saved"); loadFriends(); } catch (e) { toast(e.message); }
-    };
-    lim.addEventListener("change", save);
+    const lim = limitInputs(f, async () => {
+      try { await api(`/api/friends/${f.id}/update`, { json: lim.read() }); toast("Limits saved"); loadFriends(); } catch (e) { toast(e.message); }
+    });
     return h("div", { class: "friend-row" },
-      h("div", { class: "friend-top" }, h("b", {}, f.name),
-        h("small", {}, f.limit ? `${f.used_today}/${f.limit} today` : `${f.used_today} today · no limit`),
-        h("small", {}, f.seen ? "· active " + timeAgo(f.seen) : "· hasn't made anything yet")),
-      h("div", { class: "friend-actions" }, h("span", { class: "muted", style: "font-size:13px" }, "Images/day"), lim,
+      h("div", { class: "friend-top" }, h("b", {}, f.name), f.level ? h("span", { class: "badge" }, LEVELS[f.level].title) : null,
+        h("small", {}, f.seen ? "active " + timeAgo(f.seen) : "hasn't made anything yet")),
+      h("small", { class: "muted" }, friendUsage(f)),
+      lim,
+      h("div", { class: "friend-actions" },
         h("button", { class: "btn", type: "button", onclick: async () => {
           if (!confirm(`Make a new password for ${f.name}? Their old one stops working.`)) return;
           try { const r = await api(`/api/friends/${f.id}/reset`, { json: {} }); showSecret(f.name, r.password); } catch (e) { toast(e.message); }
@@ -822,7 +934,7 @@ $("#friend-secret-copy").addEventListener("click", async () => {
 $("#friend-add").addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
-    const r = await api("/api/friends", { json: { name: $("#friend-name").value, limit: $("#friend-limit").value, password: $("#friend-pw").value } });
+    const r = await api("/api/friends", { json: { name: $("#friend-name").value, password: $("#friend-pw").value, ...addLimits.read() } });
     e.target.reset(); showSecret(r.friend.name, r.password);
   } catch (err) { toast(err.message); }
 });
@@ -846,6 +958,197 @@ $("#pw-form").addEventListener("submit", async (e) => {
   } catch (err) { msg.textContent = err.message; }
 });
 
+/* ------------------------------------------------------------ admin panel (owner): performance, people, usage.
+   Charts are plain SVG drawn here (the page's CSP allows no outside scripts). One measure per chart, one axis each. */
+let adminTimer = null;
+const SVGNS = "http://www.w3.org/2000/svg";
+function svg(tag, attrs = {}, ...kids) {
+  const el = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs)) if (v != null) el.setAttribute(k, v);
+  for (const k of kids.flat()) if (k != null) el.append(k);
+  return el;
+}
+// categorical slots, fixed order (dataviz reference palette), dark steps unless the light theme is on
+const SERIES = { dark: ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"],
+  light: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"] };
+const seriesColor = (i) => (i < 8 ? SERIES[ME.prefs.theme === "light" ? "light" : "dark"][i] : "var(--muted)");
+const ago = (t) => (!t ? "never" : Date.now() / 1000 - t < 60 ? "just now" : timeAgo(t));
+const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+function tipLayer(card) {                              // one tooltip per chart card, follows the pointer
+  const tip = h("div", { class: "viz-tip", hidden: true });
+  card.append(tip);
+  return {
+    show(html, x, y) { tip.replaceChildren(...html); tip.hidden = false; const r = card.getBoundingClientRect();
+      tip.style.left = Math.min(r.width - tip.offsetWidth - 8, Math.max(8, x - r.left + 12)) + "px"; tip.style.top = Math.max(8, y - r.top - tip.offsetHeight - 10) + "px"; },
+    hide() { tip.hidden = true; },
+  };
+}
+
+function lineChart(title, pts, { max, unit = "", digits = 0, color = "var(--accent)" } = {}) {
+  const W = 360, H = 120, L = 28, R = 6, T = 8, B = 18;
+  const vals = pts.filter((p) => p.v != null);
+  const top = max || Math.max(1, ...vals.map((p) => p.v)) * 1.15;
+  const t0 = pts.length ? pts[0].t : 0, t1 = pts.length ? pts[pts.length - 1].t : 1, span = Math.max(1, t1 - t0);
+  const X = (t) => L + ((t - t0) / span) * (W - L - R), Y = (v) => T + (1 - v / top) * (H - T - B);
+  const last = vals.length ? vals[vals.length - 1].v : null;
+  const card = h("div", { class: "viz-card" }, h("div", { class: "viz-head" }, h("span", {}, title),
+    h("b", {}, last == null ? "–" : last.toFixed(digits) + unit)));
+  const grid = [0, 0.5, 1].map((f) => svg("g", {}, svg("line", { x1: L, x2: W - R, y1: Y(top * f), y2: Y(top * f), class: "viz-grid" }),
+    svg("text", { x: L - 6, y: Y(top * f) + 4, class: "viz-axis", "text-anchor": "end" }, (top * f).toFixed(top < 10 ? 1 : 0))));
+  const d = vals.map((p, i) => `${i ? "L" : "M"}${X(p.t).toFixed(1)},${Y(p.v).toFixed(1)}`).join("");
+  const area = vals.length ? `${d}L${X(vals[vals.length - 1].t)},${Y(0)}L${X(vals[0].t)},${Y(0)}Z` : "";
+  const cross = svg("line", { y1: T, y2: H - B, class: "viz-cross", visibility: "hidden" });
+  const dot = svg("circle", { r: 4.5, class: "viz-dot", fill: color, visibility: "hidden" });
+  const hit = svg("rect", { x: L, y: T, width: W - L - R, height: H - T - B, fill: "transparent" });
+  const chart = svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "viz", role: "img", "aria-label": `${title}, last 30 minutes` },
+    ...grid, svg("path", { d: area, fill: color, opacity: 0.12 }), svg("path", { d, fill: "none", stroke: color, "stroke-width": 2, "stroke-linejoin": "round" }),
+    svg("text", { x: L, y: H - 6, class: "viz-axis" }, pts.length ? clock(t0) : ""), svg("text", { x: W - R, y: H - 6, class: "viz-axis", "text-anchor": "end" }, "now"),
+    cross, dot, hit);
+  card.append(chart);
+  const tip = tipLayer(card);
+  hit.addEventListener("pointermove", (e) => {
+    if (!vals.length) return;
+    const r = chart.getBoundingClientRect(), t = t0 + ((e.clientX - r.left) / r.width * W - L) / (W - L - R) * span;
+    const p = vals.reduce((a, b) => (Math.abs(b.t - t) < Math.abs(a.t - t) ? b : a));
+    cross.setAttribute("x1", X(p.t)); cross.setAttribute("x2", X(p.t)); cross.setAttribute("visibility", "visible");
+    dot.setAttribute("cx", X(p.t)); dot.setAttribute("cy", Y(p.v)); dot.setAttribute("visibility", "visible");
+    tip.show([h("b", {}, p.v.toFixed(digits) + unit), h("small", {}, clock(p.t))], e.clientX, e.clientY);
+  });
+  hit.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); dot.setAttribute("visibility", "hidden"); tip.hide(); });
+  return card;
+}
+
+function stackedDays(u, people) {                      // images per day for 14 days, one colour per person
+  const W = 560, H = 190, L = 30, R = 6, T = 10, B = 24, n = u.days.length;
+  const ids = people.map((p) => p.id).filter((id) => (u.per_day[id] || []).some(Boolean));
+  const totals = u.days.map((_, i) => ids.reduce((s, id) => s + u.per_day[id][i], 0));
+  const top = Math.max(4, ...totals) * 1.1, bw = (W - L - R) / n, Y = (v) => T + (1 - v / top) * (H - T - B);
+  const color = (id) => seriesColor(people.findIndex((p) => p.id === id));
+  const name = (id) => (people.find((p) => p.id === id) || {}).name;
+  const card = h("div", { class: "viz-card wide" }, h("div", { class: "viz-head" }, h("span", {}, "Images per day · last 14 days"), h("b", {}, String(totals.reduce((a, b) => a + b, 0)))),
+    ids.length > 1 ? h("div", { class: "viz-legend" }, ...ids.map((id) => h("span", {}, h("i", { style: `background:${color(id)}` }), name(id)))) : null);
+  const tip = tipLayer(card);
+  const bars = u.days.map((d, i) => {
+    let y = Y(0);
+    const segs = ids.map((id) => { const v = u.per_day[id][i]; if (!v) return null; const hgt = Y(0) - Y(v); y -= hgt;
+      return svg("rect", { x: L + i * bw + bw * 0.18, y: y + 1, width: bw * 0.64, height: Math.max(0, hgt - 2), rx: 3, fill: color(id) }); });
+    const day = new Date(d * 1000);
+    const g = svg("g", { class: "viz-bar" }, svg("rect", { x: L + i * bw, y: T, width: bw, height: H - T - B, fill: "transparent" }), ...segs,
+      i % 2 === n % 2 || i === n - 1 ? svg("text", { x: L + i * bw + bw / 2, y: H - 7, class: "viz-axis", "text-anchor": "middle" }, i === n - 1 ? "today" : day.toLocaleDateString([], { weekday: "short" })) : null);
+    g.addEventListener("pointermove", (e) => tip.show([h("b", {}, day.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })),
+      ...ids.filter((id) => u.per_day[id][i]).map((id) => h("small", {}, h("i", { style: `background:${color(id)}` }), `${name(id)}: ${u.per_day[id][i]}`)),
+      h("small", {}, `Total: ${totals[i]}`)], e.clientX, e.clientY));
+    g.addEventListener("pointerleave", () => tip.hide());
+    return g;
+  });
+  card.insertBefore(svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "viz", role: "img", "aria-label": "Images per day, last 14 days" },
+    ...[0, 0.5, 1].map((f) => svg("g", {}, svg("line", { x1: L, x2: W - R, y1: Y(top * f), y2: Y(top * f), class: "viz-grid" }),
+      svg("text", { x: L - 6, y: Y(top * f) + 4, class: "viz-axis", "text-anchor": "end" }, Math.round(top * f)))), ...bars), card.lastChild);
+  return card;
+}
+
+function hBars(title, rows) {                          // [{label, value, color, note}] - direct-labelled, no legend needed
+  const max = Math.max(1, ...rows.map((r) => r.value));
+  return h("div", { class: "viz-card" }, h("div", { class: "viz-head" }, h("span", {}, title)),
+    h("div", { class: "hbars" }, ...rows.map((r) => h("div", { class: "hbar" }, h("span", { class: "hbar-label" }, r.label),
+      h("span", { class: "hbar-track" }, h("i", { style: `width:${(r.value / max) * 100}%;background:${r.color}` })),
+      h("b", {}, String(r.value)), r.note ? h("small", {}, r.note) : null))));
+}
+
+function tile(label, value, sub, cls = "") {
+  return h("div", { class: "tile " + cls }, h("span", {}, label), h("b", {}, value), sub ? h("small", {}, sub) : null);
+}
+
+function renderAdmin(a) {
+  const s = a.samples, last = s[s.length - 1] || {}, u = a.usage, people = a.people;
+  const sum = (k) => people.reduce((n, p) => n + ((u.totals[p.id] || {})[k] || 0), 0);
+  const online = people.filter((p) => p.online);
+  const avg = Object.entries(u.avg_seconds).map(([wf, sec]) => `${(S.workflows[wf] || {}).label || wf} ${sec}s`).join(" · ");
+  const vram = last.vram_total ? `${(last.vram_used / 1024).toFixed(1)} / ${(last.vram_total / 1024).toFixed(0)} GB` : "–";
+  const failRate = u.finished_week ? Math.round((u.failed_week / u.finished_week) * 100) : 0;
+  const body = $("#admin-body");
+  body.replaceChildren(
+    h("div", { class: "tiles" },
+      tile("Images today", String(sum("today")), `${sum("week")} in the last 7 days`),
+      tile("Online now", String(online.length), online.map((p) => p.name).join(", ") || "Nobody right now"),
+      tile("Queue", String(u.running + u.queued), u.running ? `${u.running} generating · ${u.queued} waiting` : a.online ? "ComfyUI idle" : "ComfyUI is off", a.online ? "" : "warn"),
+      tile("Time per image", avg ? avg.split(" · ")[0].replace(/^\S+ /, "") : "–", avg || "No images this week"),
+      tile("Failed (7 days)", `${failRate}%`, `${u.failed_week} of ${u.finished_week} jobs`, failRate > 10 ? "bad" : ""),
+      tile("GPU", last.gpu != null ? `${Math.round(last.gpu)}%` : "–", [a.gpu_name, last.temp != null ? `${last.temp}°C` : null, last.power != null ? `${Math.round(last.power)} W` : null].filter(Boolean).join(" · "), last.temp >= 80 ? "warn" : "")),
+    h("h3", { class: "admin-title" }, "Performance ", h("small", { class: "muted" }, "last 30 minutes, every 5 seconds")),
+    h("div", { class: "viz-grid-wrap" },
+      lineChart("GPU load", s.map((x) => ({ t: x.t, v: x.gpu })), { max: 100, unit: "%" }),
+      lineChart("VRAM used", s.map((x) => ({ t: x.t, v: x.vram_used != null ? x.vram_used / 1024 : null })), { max: last.vram_total ? last.vram_total / 1024 : null, unit: " GB", digits: 1 }),
+      lineChart("GPU temperature", s.map((x) => ({ t: x.t, v: x.temp })), { max: 100, unit: "°C" }),
+      lineChart("CPU load", s.map((x) => ({ t: x.t, v: x.cpu })), { max: 100, unit: "%" })),
+    h("h3", { class: "admin-title" }, "People"),
+    h("div", {}, h("div", { class: "table-wrap" }, h("table", { class: "ppl" },
+      h("thead", {}, h("tr", {}, ...["", "Who", "Doing", "Device", "Last seen", "Today / 7 days / all", "Limits"].map((t) => h("th", {}, t)))),
+      h("tbody", {}, ...people.map((p, i) => {
+        const t = u.totals[p.id] || {}, l = p.limits;
+        return h("tr", {}, h("td", {}, h("i", { class: "dot " + (p.online ? "on" : ""), title: p.online ? "Online" : "Offline" }), h("i", { class: "swatch-dot", style: `background:${seriesColor(i)}` })),
+          h("td", {}, h("b", {}, p.name), h("small", {}, p.role === "owner" ? "Owner" : "Friend", " · ", LEVELS[p.level] ? LEVELS[p.level].title : "Not picked yet")),
+          h("td", {}, p.job ? h("span", {}, p.doing, h("small", {}, `${(S.workflows[p.job.workflow] || {}).label || ""} · ${Math.round((p.job.progress || 0) * 100)}% · ${(p.job.summary || "").slice(0, 60)}`)) : p.doing || h("span", { class: "muted" }, "–")),
+          h("td", {}, p.device || "–", p.via ? h("small", {}, p.via) : null),
+          h("td", {}, ago(p.last)),
+          h("td", {}, `${t.today || 0} / ${t.week || 0} / ${t.all || 0}`),
+          h("td", {}, l ? h("small", {}, [l.limit ? `${l.limit}/day` : "no daily cap", l.hourly ? `${l.hourly}/hour` : null, `${l.concurrent} at once`, `${l.per_run}/run`].filter(Boolean).join(" · ")) : h("span", { class: "muted" }, "–")));
+      }))))),
+    h("h3", { class: "admin-title" }, "Usage"),
+    h("div", { class: "viz-grid-wrap" },
+      stackedDays(u, people),
+      hBars("Images per person · last 7 days", people.map((p, i) => ({ label: p.name, value: (u.totals[p.id] || {}).week || 0, color: seriesColor(i) })).filter((r) => r.value).sort((a, b) => b.value - a.value)),
+      hBars("Images per model · last 7 days", Object.entries(S.workflows).map(([wf, w], i) => ({ label: w.label, value: u.by_workflow[wf] || 0, color: seriesColor(i),
+        note: u.avg_seconds[wf] ? `${u.avg_seconds[wf]}s each` : "" })))),
+    h("div", { class: "admin-cols" },
+      h("div", {}, h("h3", { class: "admin-title" }, "Activity"),
+        a.events.length ? h("ul", { class: "feed" }, ...a.events.slice(0, 30).map((e) => h("li", {}, h("small", {}, clock(e.t)), h("b", {}, e.name), ` ${e.action.toLowerCase()}`, e.detail ? h("span", { class: "muted" }, ` · ${e.detail}`) : null)))
+          : h("p", { class: "muted" }, "Nothing yet since the app last restarted.")),
+      h("div", {}, h("h3", { class: "admin-title" }, "Recent jobs"),
+        h("div", { class: "table-wrap" }, h("table", { class: "ppl jobs-t" },
+          h("thead", {}, h("tr", {}, ...["When", "Who", "Model", "Result", "Time", "Prompt"].map((t) => h("th", {}, t)))),
+          h("tbody", {}, ...a.recent.map((r) => h("tr", {}, h("td", {}, ago(r.created)), h("td", {}, r.user), h("td", {}, (S.workflows[r.workflow] || {}).label || r.workflow),
+            h("td", {}, h("span", { class: "pill " + r.status }, r.status === "done" ? `${r.images} image${r.images === 1 ? "" : "s"}` : r.status)),
+            h("td", {}, r.seconds != null ? `${r.seconds}s` : "–"), h("td", { class: "clip" }, r.summary)))))))));
+  $("#admin-updated").textContent = "Live · updated " + clock(a.now);
+}
+async function loadAdmin() {
+  clearTimeout(adminTimer);
+  if ($("#admin").hidden) return;
+  try { renderAdmin(await api("/api/admin")); } catch (e) { $("#admin-updated").textContent = e.message; }
+  adminTimer = setTimeout(loadAdmin, 5000);
+}
+$("#open-admin").addEventListener("click", () => { $("#admin").hidden = false; loadAdmin(); });
+
+/* ------------------------------------------------------------ level & colours */
+async function savePrefs(p) {
+  const before = level();
+  try { ME.prefs = (await api("/api/prefs", { json: p })).prefs; } catch (e) { toast(e.message); return; }
+  applyTheme(ME.prefs.theme);
+  if (level() !== before) { tidyForLevel(); renderForm(); }
+  renderPrefs();
+}
+function levelChoices(onPick) {
+  return Object.entries(LEVELS).map(([id, l]) => h("button", { class: "choice", type: "button", role: "radio", "aria-checked": String(level() === id && !!ME.prefs.level),
+    onclick: () => onPick(id) }, h("b", {}, l.title), h("small", {}, l.hint)));
+}
+function renderPrefs() {
+  $("#level-choices").replaceChildren(...levelChoices((id) => savePrefs({ level: id }).then(() => toast(`Switched to ${LEVELS[id].title}`))));
+  $("#theme-choices").replaceChildren(...THEMES.map(([id, name, bg, a, b]) => h("button", { class: "theme", type: "button", role: "radio",
+    "aria-checked": String(ME.prefs.theme === id), onclick: () => savePrefs({ theme: id }) },
+    h("span", { class: "swatch", style: `background:linear-gradient(135deg, ${bg} 50%, ${a} 50% 75%, ${b} 75%)` }), name)));
+}
+function showWelcome() {                              // a friend's first visit: pick a level before the studio opens
+  $("#welcome-title").textContent = `Welcome, ${ME.name}`;
+  $("#welcome-levels").replaceChildren(...levelChoices(async (id) => {
+    await savePrefs({ level: id });
+    $("#welcome").hidden = true; $("#app").hidden = false;
+    toast("You can change this anytime in Settings");
+  }));
+  $("#app").hidden = true; $("#welcome").hidden = false;
+}
+
 /* ------------------------------------------------------------ boot */
 function showDown() {
   $("#app").hidden = true; $("#login").hidden = true; $("#down").hidden = false; stopPolling();
@@ -856,14 +1159,17 @@ async function boot() {
   await loadApiBase();
   const me = await api("/api/me");
   if (!me.logged_in) return showLogin();
-  ME = { name: me.name, role: me.role };
+  ME = { name: me.name, role: me.role, prefs: me.prefs || { level: "dev", theme: "chrome" } };
+  applyTheme(ME.prefs.theme);
   document.body.classList.toggle("friend", ME.role !== "owner");
   $("#signed-in").textContent = ME.role === "owner" ? "Signed in as the owner" : `Signed in as ${ME.name}`;
   S = await api("/api/schema");
   if (!S.workflows[wf]) wf = Object.keys(S.workflows)[0];
   for (const w of Object.keys(S.workflows)) values[w] = loadValues(w);
+  if (ME.prefs.level && store.get("tidied") !== level()) tidyForLevel();   // this device last ran at another level
   $("#login").hidden = true; $("#app").hidden = false;
-  renderTabs(); renderForm(); loadRecent(); poll();
+  renderTabs(); renderForm(); renderPrefs(); loadRecent(); poll();
+  if (!ME.prefs.level) showWelcome();
   if (!Object.values(S.workflows).some((w) => (w.loras || []).length)) setTimeout(async () => { try { S = await api("/api/schema"); renderForm(); } catch { /* later */ } }, 5000);
 }
 boot().catch(showDown);
