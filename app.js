@@ -1167,6 +1167,21 @@ async function boot() {
   if (!S.workflows[wf]) wf = Object.keys(S.workflows)[0];
   for (const w of Object.keys(S.workflows)) values[w] = loadValues(w);
   if (ME.prefs.level && store.get("tidied") !== level()) tidyForLevel();   // this device last ran at another level
+  if (!store.get("lorasStartOff")) {                  // once per device: LoRAs that were only on because the workflow had them on
+    const keep = wf;
+    for (const w of Object.keys(S.workflows)) {
+      wf = w;
+      for (const f of S.workflows[w].fields) {
+        const x = values[w][f.id];
+        if (f.type === "lora" && x && x.on && x.name === f.default.name && !(x.pick && Object.values(x.pick).some((p) => p.length))) {
+          values[w].prompt = editTags(values[w].prompt, x.added || [], []);
+          values[w][f.id] = { ...x, on: false, added: [] };
+        }
+      }
+      saveValues();
+    }
+    wf = keep; store.set("lorasStartOff", true);
+  }
   $("#login").hidden = true; $("#app").hidden = false;
   renderTabs(); renderForm(); renderPrefs(); loadRecent(); poll();
   if (!ME.prefs.level) showWelcome();
