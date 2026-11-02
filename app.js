@@ -187,7 +187,9 @@ function fieldEl(f, v) {
       const counter = h("span", { class: "counter" }, "");
       const upd = () => { counter.textContent = ta.value.length > f.max * 0.8 ? `${ta.value.length}/${f.max}` : ""; };
       ta.addEventListener("input", () => { set(f.id, ta.value); upd(); }); upd();
-      return wrap(h("div", { class: "textarea-wrap" }, ta, counter));
+      const el = wrap(h("div", { class: "textarea-wrap" }, ta, counter));
+      if (wf === "anime" && f.id === "prompt") el.append(tagger(ta));   // Illustrious wants Danbooru tags
+      return el;
     }
     case "image": {
       if (f.group === "refs") {
@@ -251,6 +253,95 @@ function fieldEl(f, v) {
   }
   return h("div");
 }
+/* ------------------------------------------------------------ Illustrious prompt helper
+   Write it in plain words and the PC's text model turns it into Danbooru tags, or tap/search real tags. */
+const PICKS = {
+  People: ["1girl", "1boy", "solo", "2girls", "2boys", "multiple girls"],
+  Hair: ["long hair", "short hair", "medium hair", "ponytail", "twintails", "black hair", "white hair", "grey hair", "blonde hair", "brown hair", "red hair", "blue hair", "pink hair", "purple hair"],
+  Eyes: ["red eyes", "blue eyes", "green eyes", "yellow eyes", "purple eyes", "heterochromia", "glowing eyes"],
+  Outfit: ["hoodie", "school uniform", "serafuku", "jacket", "kimono", "armor", "dress", "suit", "t-shirt", "scarf"],
+  Face: ["smile", "blush", "open mouth", "closed eyes", "serious", "angry", "crying", "smirk", "expressionless"],
+  Pose: ["standing", "sitting", "looking at viewer", "looking back", "looking to the side", "arms crossed", "hand in pocket", "walking", "running"],
+  Camera: ["portrait", "upper body", "cowboy shot", "full body", "close-up", "from below", "from above", "from side", "dutch angle", "depth of field"],
+  Place: ["outdoors", "indoors", "cityscape", "rooftop", "street", "forest", "classroom", "bedroom", "beach", "simple background", "white background"],
+  Light: ["day", "sunset", "night", "night sky", "rain", "snow", "backlighting", "sunlight", "neon lights", "light particles"],
+};
+const QUALITY_TAGS = "masterpiece, best quality, amazing quality, very aesthetic, absurdres";
+const splitTags = (s) => (s || "").split(",").map((t) => t.trim()).filter(Boolean);
+function tagger(ta) {
+  const has = (t) => splitTags(ta.value).some((x) => x.toLowerCase() === t);
+  const write = (list) => { ta.value = list.join(", "); ta.dispatchEvent(new Event("input")); refresh(); };
+  const toggle = (t) => write(has(t) ? splitTags(ta.value).filter((x) => x.toLowerCase() !== t) : [...splitTags(ta.value), t]);
+  const addTags = (list) => { const cur = splitTags(ta.value), low = cur.map((x) => x.toLowerCase()); write([...cur, ...list.filter((t) => !low.includes(t))]); };
+
+  // 1 · plain words -> tags
+  const words = h("textarea", { rows: 2, maxlength: 600, placeholder: "a girl with silver hair on a snowy rooftop at night, looking sad", "aria-label": "Describe it in plain words" });
+  try { words.value = sessionStorage.getItem("cr.words") || ""; } catch { /* private mode */ }
+  words.addEventListener("input", () => { try { sessionStorage.setItem("cr.words", words.value); } catch { /* ignore */ } });
+  const convert = h("button", { class: "btn primary", type: "button" }, "Turn into tags");
+  const result = h("div", { class: "tg-result", hidden: true });
+  const quality = h("input", { type: "checkbox", checked: true });
+  convert.onclick = async () => {
+    if (!words.value.trim()) { toast("Describe the picture first"); return; }
+    convert.disabled = true; convert.textContent = "Writing tags…";
+    try {
+      const r = await api("/api/tagify", { json: { text: words.value } });
+      const chips = h("div", { class: "tg-chips" });
+      let picked = r.tags.map((x) => x.tag);
+      r.tags.forEach((x) => {
+        const b = h("button", { type: "button", class: "tg-chip" + (x.known ? "" : " unknown"), "aria-pressed": "true", title: x.known ? `${x.count.toLocaleString()} images on Danbooru` : "Not a standard tag, but the model may still get it" }, x.tag);
+        b.onclick = () => { const on = b.getAttribute("aria-pressed") !== "true"; b.setAttribute("aria-pressed", String(on)); picked = on ? [...picked, x.tag] : picked.filter((t) => t !== x.tag); };
+        chips.append(b);
+      });
+      result.replaceChildren(
+        h("p", { class: "hint" }, "Tap a tag to leave it out. Dashed ones aren't standard tags."), chips,
+        h("label", { class: "tg-q" }, quality, h("span", {}, "Start with quality tags")),
+        h("div", { class: "row-btns" },
+          h("button", { class: "btn primary", type: "button", onclick: () => { const keep = r.tags.map((x) => x.tag).filter((t) => picked.includes(t)); write([...(quality.checked ? splitTags(QUALITY_TAGS) : []), ...keep]); toast("Prompt replaced with tags"); } }, "Use as my prompt"),
+          h("button", { class: "btn", type: "button", onclick: () => { addTags(r.tags.map((x) => x.tag).filter((t) => picked.includes(t))); toast("Tags added"); } }, "Add to my prompt")));
+      result.hidden = false;
+    } catch (e) { toast(e.message); }
+    convert.disabled = false; convert.textContent = "Turn into tags";
+  };
+
+  // 2 · search the real tag list
+  const search = h("input", { class: "input", type: "search", placeholder: "Search tags: hood, sunset, katana…", "aria-label": "Search tags", autocomplete: "off" });
+  const sugg = h("div", { class: "tg-sugg" });
+  let timer;
+  search.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const q = search.value.trim();
+      if (!q) { sugg.replaceChildren(); return; }
+      try {
+        const r = await api("/api/tags?q=" + encodeURIComponent(q));
+        sugg.replaceChildren(...r.tags.map((x) => h("button", { type: "button", class: "tg-s" + (has(x.tag) ? " on" : ""), onclick: (e) => { toggle(x.tag); e.currentTarget.classList.toggle("on", has(x.tag)); } },
+          h("span", {}, x.tag), x.via ? h("small", {}, `for "${x.via}"`) : null, h("em", {}, x.cat !== "general" ? x.cat : fmtCount(x.count)))));
+      } catch { /* offline */ }
+    }, 160);
+  });
+
+  // 3 · quick picks
+  const picks = h("div", { class: "tg-picks" });
+  const pickBtns = [];
+  for (const [cat, list] of Object.entries(PICKS)) {
+    const lane = h("div", { class: "tg-lane" }, h("b", {}, cat));
+    list.forEach((t) => { const b = h("button", { type: "button", class: "tg-chip", onclick: () => toggle(t) }, t); pickBtns.push([t, b]); lane.append(b); });
+    picks.append(lane);
+  }
+  function refresh() { pickBtns.forEach(([t, b]) => b.setAttribute("aria-pressed", String(has(t)))); }
+  ta.addEventListener("input", refresh); refresh();
+
+  const det = h("details", { class: "tagger", open: store.get("tagger.open", false) },
+    h("summary", {}, h("span", { class: "tg-spark" }, "✦"), "Prompt helper", h("small", {}, "write normally or tap tags")),
+    h("div", { class: "tg-body" },
+      h("div", { class: "tg-sec" }, h("span", { class: "field-label" }, "Say it in plain words"), words, convert, result),
+      h("div", { class: "tg-sec" }, h("span", { class: "field-label" }, "Find a tag"), search, sugg),
+      h("div", { class: "tg-sec" }, h("span", { class: "field-label" }, "Quick picks"), picks)));
+  det.addEventListener("toggle", () => store.set("tagger.open", det.open));
+  return det;
+}
+const fmtCount = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(n);
 const fmt = (x) => { const n = Number(x); return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0$/, ""); };
 
 function slotEl(name, onChange, num = null, isAdd = false, room = 1) {
