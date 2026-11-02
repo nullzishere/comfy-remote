@@ -878,7 +878,9 @@ function openViewer(list, i, flat = false) {
 function show() {
   const it = V.list[V.i]; if (!it) return;
   $("#viewer-img").removeAttribute("src");
-  authSrc($("#viewer-img"), `/api/image/${it.id}/${it.idx}`);
+  if (IOS && ON_PAGES) {                              // a real link (not a blob), so press-and-hold on the image can save it
+    imageLink(it).then((u) => { if (V.list[V.i] === it) $("#viewer-img").src = u; }).catch(() => authSrc($("#viewer-img"), `/api/image/${it.id}/${it.idx}`));
+  } else authSrc($("#viewer-img"), `/api/image/${it.id}/${it.idx}`);
   $("#viewer-download").href = ON_PAGES ? "#" : `/api/image/${it.id}/${it.idx}?download=1`;
   $("#viewer-caption").textContent = (it.by ? `by ${it.by} · ` : "") + (it.summary || "");
   $("#viewer-count").textContent = V.list.length > 1 ? `${V.i + 1} / ${V.list.length}` : "";
@@ -899,15 +901,27 @@ function show() {
 // Phones and tablets: Save opens the system share sheet (iPhone: "Save Image" puts it in Photos) instead of a download.
 // Where that isn't available (some in-app/Chrome builds), a press-and-hold screen with the real image does the job.
 const TOUCH = matchMedia("(pointer: coarse)").matches;
-const SHARE_SAVE = TOUCH && !!navigator.share;
+// iPhone Chrome/Firefox/Edge turn a shared file into their own "Save in Files / Drive" download, but their long-press
+// menu on a real image link has "Save Image", which goes to Photos. Safari's share sheet has "Save Image" itself.
+const UA = navigator.userAgent;
+const IOS = /iPhone|iPad|iPod/.test(UA) || (UA.includes("Macintosh") && navigator.maxTouchPoints > 1);
+const IOS_OTHER = IOS && /CriOS|FxiOS|EdgiOS|OPiOS|GSA\//.test(UA);
+const SHARE_SAVE = TOUCH && !!navigator.share && !IOS_OTHER;
+const LINKS = new Map();                              // image -> signed link (10 min), so iPhone long-press can save it
+async function imageLink(it) {
+  const key = `${it.id}/${it.idx}`, hit = LINKS.get(key);
+  if (hit && hit.until > Date.now()) return hit.url;
+  const r = await api(`/api/image/${key}?link=1`);
+  LINKS.set(key, { url: API + r.path, until: Date.now() + 8 * 60 * 1000 });
+  return API + r.path;
+}
 async function pressHoldSave(it) {
   const img = $("#savesheet-img");
   img.removeAttribute("src");
+  $("#savesheet-what").textContent = IOS_OTHER ? "Save Image" : IOS ? "Save to Photos" : "Save image";
   $("#savesheet").hidden = false;
-  try {
-    const r = await api(`/api/image/${it.id}/${it.idx}?link=1`);
-    img.src = API + r.path;                           // a real link, so the long-press menu offers Save to Photos
-  } catch (e) { toast(e.message); $("#savesheet").hidden = true; }
+  try { img.src = await imageLink(it); }              // a real link, so the long-press menu can save it to Photos
+  catch (e) { toast(e.message); $("#savesheet").hidden = true; }
 }
 $("#savesheet-close").addEventListener("click", () => { $("#savesheet").hidden = true; });
 const step = (d) => { V.i = Math.min(V.list.length - 1, Math.max(0, V.i + d)); show(); };
@@ -922,7 +936,7 @@ document.addEventListener("keydown", (e) => {
 });
 $("#viewer-download").addEventListener("click", async (e) => {
   const it = V.list[V.i];
-  if (TOUCH && (!SHARE_SAVE || !V.file || (navigator.canShare && !navigator.canShare({ files: [V.file] })))) {
+  if (IOS_OTHER || (TOUCH && (!SHARE_SAVE || !V.file || (navigator.canShare && !navigator.canShare({ files: [V.file] }))))) {
     e.preventDefault();
     pressHoldSave(it);
     return;

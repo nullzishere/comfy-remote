@@ -301,7 +301,7 @@ input:checked + .switch::after { transform: translateX(20px); }
 .viewer-top { display: flex; align-items: center; gap: 10px; padding: max(8px, env(safe-area-inset-top)) 12px 4px; }
 .viewer-stage { position: relative; min-height: 0; overflow: hidden; touch-action: pan-y; }
 /* absolutely placed so max-height has a real height to measure against: tall images shrink to fit any screen */
-.viewer-stage img { position: absolute; inset: 0; margin: auto; max-width: calc(100% - 16px); max-height: 100%; object-fit: contain; border-radius: 10px; user-select: none; box-shadow: 0 0 60px -20px var(--accent); }
+.viewer-stage img { position: absolute; inset: 0; margin: auto; max-width: calc(100% - 16px); max-height: 100%; object-fit: contain; border-radius: 10px; user-select: none; -webkit-touch-callout: default; box-shadow: 0 0 60px -20px var(--accent); }
 .viewer .nav { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 64px; border: 0; border-radius: 14px; background: color-mix(in srgb, var(--panel-2) 85%, transparent); color: var(--text); cursor: pointer; display: grid; place-items: center; }
 .viewer .prev { left: 10px; } .viewer .next { right: 10px; }
 .viewer-caption { margin: 8px 16px 0; font-size: 13px; color: var(--muted); text-align: center; max-height: 3.2em; overflow: hidden; }
