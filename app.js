@@ -1241,6 +1241,10 @@ async function boot() {
   if (!S.workflows[wf]) wf = Object.keys(S.workflows)[0];
   for (const w of Object.keys(S.workflows)) values[w] = loadValues(w);
   if (ME.prefs.level && store.get("tidied") !== level()) tidyForLevel();   // this device last ran at another level
+  const nf = S.workflows.anime && S.workflows.anime.fields.find((f) => f.id === "negative");
+  if (nf && values.anime && /no sunglasses, human, realistic skin/.test(values.anime.negative || "")) {   // the old character-specific negative
+    const keep = wf; wf = "anime"; values.anime.negative = nf.default; saveValues(); wf = keep;
+  }
   if (!store.get("lorasStartOff")) {                  // once per device: LoRAs that were only on because the workflow had them on
     const keep = wf;
     for (const w of Object.keys(S.workflows)) {
