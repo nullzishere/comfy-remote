@@ -516,3 +516,27 @@ textarea.flash { animation: flash 1.2s ease-out; }
 #admin .sheet-body { grid-template-columns: minmax(0, 1fr); }
 #admin .sheet-body > *, .admin-cols > * { min-width: 0; }
 @media (max-width: 600px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .viz-grid-wrap { grid-template-columns: minmax(0, 1fr); } }
+
+/* ------------------------------------------------------------ admin tabs + Grand library */
+.admin-tabs { display: flex; gap: 4px; margin-left: 16px; padding: 3px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); }
+.admin-tabs button { border: 0; background: transparent; border-radius: 9px; padding: 6px 12px; font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.admin-tabs button[aria-selected="true"] { color: var(--text); background: rgba(var(--acc-rgb), .2); box-shadow: inset 0 0 0 1px rgba(var(--acc-rgb), .35); }
+#admin .sheet-head { gap: 6px; }
+#admin .sheet-head h2 { flex: none; }
+.library { max-width: none !important; }
+.lib-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; justify-content: space-between; }
+.lib-head p { margin: 4px 0 0; }
+.lib-head .input { max-width: 380px; }
+.lib-filters { display: grid; gap: 8px; }
+.lib-grid { columns: 5 220px; column-gap: 10px; }
+@media (max-width: 600px) { .lib-grid { columns: 2 140px; column-gap: 8px; } }
+.lib-item { position: relative; display: block; width: 100%; margin: 0 0 10px; padding: 0; border: 0; border-radius: 14px; overflow: hidden; background: var(--panel-2); cursor: pointer; break-inside: avoid; transition: box-shadow .25s; }
+.lib-item img { display: block; width: 100%; height: auto; min-height: 80px; transition: transform .35s; }
+.lib-item:hover { box-shadow: 0 0 26px -6px var(--accent); }
+.lib-item:hover img { transform: scale(1.03); }
+.lib-cap { position: absolute; left: 0; right: 0; bottom: 0; display: grid; gap: 1px; padding: 22px 10px 8px; text-align: left; font-size: 12.5px; color: #fff;
+  background: linear-gradient(to top, rgba(0, 0, 0, .78), transparent); opacity: 0; transition: opacity .25s; }
+.lib-cap small { color: rgba(255, 255, 255, .75); font-size: 11.5px; }
+.lib-item:hover .lib-cap, .lib-item:focus-visible .lib-cap { opacity: 1; }
+@media (hover: none) { .lib-cap { opacity: 1; padding-top: 16px; } }
+@media (max-width: 600px) { .admin-tabs { margin-left: 8px; } .admin-tabs button { padding: 6px 8px; font-size: 12px; } #admin .sheet-head h2 { display: none; } }

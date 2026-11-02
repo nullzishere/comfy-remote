@@ -109,8 +109,19 @@
 </div>
 
 <div class="sheet" id="admin" hidden>
-  <div class="sheet-head"><h2>Admin</h2><span class="muted admin-updated" id="admin-updated"></span><button class="icon-btn close" type="button" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+  <div class="sheet-head"><h2>Admin</h2>
+    <div class="admin-tabs" role="tablist"><button type="button" role="tab" data-tab="stats" aria-selected="true">Analytics</button><button type="button" role="tab" data-tab="library" aria-selected="false">Grand library</button></div>
+    <span class="muted admin-updated" id="admin-updated"></span><button class="icon-btn close" type="button" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
   <div class="sheet-body" id="admin-body"><p class="muted">Loading…</p></div>
+  <div class="sheet-body library" id="library-body" hidden>
+    <div class="lib-head">
+      <div><h3 class="admin-title">Grand library</h3><p class="muted" id="lib-count"></p></div>
+      <input class="input" id="lib-search" type="search" placeholder="Search prompts or names…" autocomplete="off" aria-label="Search the library">
+    </div>
+    <div class="lib-filters"><div class="chips wrap" id="lib-people" role="radiogroup" aria-label="Made by"></div><div class="chips wrap" id="lib-models" role="radiogroup" aria-label="Model"></div></div>
+    <div class="lib-grid" id="lib-grid"></div>
+    <button class="btn ghost wide" id="lib-more" type="button" hidden>Load more</button>
+  </div>
 </div>
 
 <div class="sheet" id="settings" hidden>

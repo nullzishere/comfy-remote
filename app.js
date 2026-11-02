@@ -1116,10 +1116,47 @@ function renderAdmin(a) {
 async function loadAdmin() {
   clearTimeout(adminTimer);
   if ($("#admin").hidden) return;
-  try { renderAdmin(await api("/api/admin")); } catch (e) { $("#admin-updated").textContent = e.message; }
+  if (!$("#admin-body").hidden) {
+    try { renderAdmin(await api("/api/admin")); } catch (e) { $("#admin-updated").textContent = e.message; }
+  }
   adminTimer = setTimeout(loadAdmin, 5000);
 }
-$("#open-admin").addEventListener("click", () => { $("#admin").hidden = false; loadAdmin(); });
+function adminTab(tab) {
+  document.querySelectorAll(".admin-tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === tab)));
+  $("#admin-body").hidden = tab !== "stats"; $("#library-body").hidden = tab !== "library";
+  $("#admin-updated").hidden = tab !== "stats";
+  store.set("adminTab", tab);
+  if (tab === "library") loadLibrary(true); else loadAdmin();
+}
+document.querySelectorAll(".admin-tabs button").forEach((b) => b.addEventListener("click", () => adminTab(b.dataset.tab)));
+$("#open-admin").addEventListener("click", () => { $("#admin").hidden = false; adminTab(store.get("adminTab", "stats")); });
+
+/* The Grand Library: every image made through the website, by anyone (images made in ComfyUI itself never show). */
+const LIB = { who: "", wf: "", q: "", items: [], total: 0 };
+async function loadLibrary(reset = false) {
+  if (reset) LIB.items = [];
+  const qs = new URLSearchParams({ offset: LIB.items.length, limit: 60, who: LIB.who, wf: LIB.wf, q: LIB.q });
+  let r;
+  try { r = await api("/api/library?" + qs); } catch (e) { toast(e.message); return; }
+  LIB.total = r.total;
+  const start = LIB.items.length;
+  LIB.items.push(...r.items.map((x) => ({ id: x.job, idx: x.idx, by: x.who, summary: x.prompt, workflow: x.wf, created: x.t, seconds: x.seconds, uid: x.uid })));
+  $("#lib-count").textContent = r.all ? `${r.all} image${r.all === 1 ? "" : "s"} made through the website${r.total !== r.all ? ` · ${r.total} match` : ""}` : "Nothing made through the website yet.";
+  const chip = (label, on, onclick) => h("button", { class: "tg-chip", type: "button", role: "radio", "aria-checked": String(on), onclick }, label);
+  $("#lib-people").replaceChildren(chip(`Everyone · ${r.all}`, !LIB.who, () => { LIB.who = ""; loadLibrary(true); }),
+    ...r.people.map((p) => chip(`${p.name} · ${p.n}`, LIB.who === p.uid, () => { LIB.who = LIB.who === p.uid ? "" : p.uid; loadLibrary(true); })));
+  $("#lib-models").replaceChildren(chip("All models", !LIB.wf, () => { LIB.wf = ""; loadLibrary(true); }),
+    ...Object.entries(r.models).map(([wf, n]) => chip(`${(S.workflows[wf] || {}).label || wf} · ${n}`, LIB.wf === wf, () => { LIB.wf = LIB.wf === wf ? "" : wf; loadLibrary(true); })));
+  const grid = $("#lib-grid");
+  if (reset) grid.replaceChildren();
+  LIB.items.slice(start).forEach((it, k) => grid.append(h("button", { class: "lib-item", type: "button", "aria-label": `Image by ${it.by}`, onclick: () => openViewer(LIB.items, start + k, true) },
+    authImg(`/api/image/${it.id}/${it.idx}?thumb=1`, { loading: "lazy" }),
+    h("span", { class: "lib-cap" }, h("b", {}, it.by), h("small", {}, `${(S.workflows[it.workflow] || {}).label || it.workflow} · ${ago(it.created)}`)))));
+  $("#lib-more").hidden = LIB.items.length >= LIB.total;
+}
+$("#lib-more").addEventListener("click", () => loadLibrary());
+let libTimer;
+$("#lib-search").addEventListener("input", () => { clearTimeout(libTimer); libTimer = setTimeout(() => { LIB.q = $("#lib-search").value.trim(); loadLibrary(true); }, 250); });
 
 /* ------------------------------------------------------------ level & colours */
 async function savePrefs(p) {
