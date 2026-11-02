@@ -368,3 +368,5 @@ body.friend .owner-only { display: none !important; }
 .lora-trig { display: grid; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
 .lora-trig .hint { margin: 0; }
 .lora-trig .tg-lane > b { width: 68px; }
+.chips.wrap { flex-wrap: wrap; gap: 6px; }
+.chips .tg-chip[aria-checked="true"] { border-color: var(--accent); background: rgba(139, 92, 255, .16); box-shadow: 0 0 14px -6px var(--accent); }

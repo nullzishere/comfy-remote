@@ -160,12 +160,39 @@ function activeCount(g, fields, v) {
   if (g === "refs") return fields.filter((f) => v[f.id]).length;
   if (g === "loras") return fields.filter((f) => v[f.id] && v[f.id].on).length;
   if (g === "quality") return fields.filter((f) => v[f.id] === true).length;
+  if (g === "addons") return fields.filter((f) => f.id !== "angle_height" && visible(f, v) && v[f.id] !== "off" && v[f.id] !== false).length;
   return 0;
 }
 
 function set(id, val, rerender = false) {
-  values[wf][id] = val; saveValues();
+  values[wf][id] = val;
+  const f = S.workflows[wf].fields.find((x) => x.id === id);
+  if (f && (f.group === "addons" || id === "speed")) applyAddons(f);
+  saveValues();
   if (rerender) renderForm();
+}
+/* Realistic add-ons: picking one switches the settings it needs (o.set) and keeps its trigger words in the prompt. */
+function addonTags(v) {
+  const tags = [];
+  for (const f of S.workflows[wf].fields) {
+    if (f.type !== "choice" || !visible(f, v)) continue;
+    const o = f.options.find((o) => o.value === String(v[f.id]));
+    if (o && o.prompt) tags.push(...o.prompt.map((t) => (f.id === "angle_height" && v.angle_close ? t + " close-up" : t)));
+  }
+  if (v.phone) tags.push("convert this into a real phone photo");
+  return tags;
+}
+function applyAddons(f) {
+  const v = values[wf];
+  const o = f.type === "choice" ? f.options.find((o) => o.value === String(v[f.id])) : f.id === "phone" && v.phone ? { set: { mode: "3" } } : null;
+  const dflt = defaults(wf);
+  for (const [k, val] of Object.entries((o && o.set) || {})) {
+    if (k === "mode" && v.mode !== val) toast("Switched to “Edit a photo”: add the photo to change");
+    v[k] = val === "default" ? dflt[k] : val;
+  }
+  const key = "addon." + wf, before = store.get(key, []), now = addonTags(v);
+  v.prompt = editTags(v.prompt, before, now);
+  store.set(key, now);
 }
 
 function fieldEl(f, v) {
@@ -173,6 +200,11 @@ function fieldEl(f, v) {
   const wrap = (...kids) => h("div", { class: "field" }, h("span", { class: "field-label" }, label), hint ? h("p", { class: "hint" }, hint) : null, ...kids);
   switch (f.type) {
     case "choice": {
+      if (f.compact) {
+        const box = h("div", { class: "chips wrap", role: "radiogroup" });
+        for (const o of f.options) box.append(h("button", { class: "tg-chip", type: "button", role: "radio", "aria-checked": String(String(v[f.id]) === o.value), title: o.hint || "", onclick: () => set(f.id, o.value, true) }, o.label));
+        return wrap(box);
+      }
       const box = h("div", { class: "choices", role: "radiogroup" });
       for (const o of f.options) {
         box.append(h("button", { class: "choice", type: "button", role: "radio", "aria-checked": String(String(v[f.id]) === o.value),
@@ -236,9 +268,10 @@ function fieldEl(f, v) {
       const cb = h("input", { type: "checkbox", checked: !!x.on });
       cb.addEventListener("change", () => setLora(f.id, { on: cb.checked }));
       const sel = h("select", { class: "input", "aria-label": label + " file" });
-      const avail = S.workflows[wf].loras || [];
-      const names = avail.length ? avail : [x.name];
-      for (const n of names) sel.append(h("option", { value: n, selected: n === x.name }, n.replace(/\.safetensors$/, "")));
+      const avail = f.options || S.workflows[wf].loras || [];
+      const labels = S.workflows[wf].lora_labels || {}, nice = (n) => labels[n] || n.replace(/\.safetensors$/, "");
+      const names = (avail.length ? [...avail] : [x.name]).sort((a, b) => nice(a).localeCompare(nice(b)));
+      for (const n of names) sel.append(h("option", { value: n, selected: n === x.name }, nice(n)));
       sel.addEventListener("change", () => setLora(f.id, { name: sel.value, pick: {} }));
       const st = h("input", { class: "input", type: "number", step: "0.05", min: "-2", max: "2", value: x.strength, inputmode: "decimal", "aria-label": label + " strength" });
       st.addEventListener("change", () => set(f.id, { ...values[wf][f.id], strength: Number(st.value) }));
