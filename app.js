@@ -510,7 +510,7 @@ function renderFriends(list) {
       try { await api(`/api/friends/${f.id}/update`, { json: { limit: lim.value } }); toast("Limit saved"); loadFriends(); } catch (e) { toast(e.message); }
     };
     lim.addEventListener("change", save);
-    return h("div", { class: "friend" },
+    return h("div", { class: "friend-row" },
       h("div", { class: "friend-top" }, h("b", {}, f.name),
         h("small", {}, f.limit ? `${f.used_today}/${f.limit} today` : `${f.used_today} today · no limit`),
         h("small", {}, f.seen ? "· active " + timeAgo(f.seen) : "· hasn't made anything yet")),

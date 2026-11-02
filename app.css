@@ -282,7 +282,7 @@ body.friend .owner-only { display: none !important; }
 .by { color: var(--accent); font-weight: 600; }
 .friends { display: grid; gap: 8px; }
 .friends:empty { display: none; }
-.friend { display: grid; gap: 8px; padding: 12px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line); }
+.friend-row { display: grid; gap: 8px; padding: 12px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line); }
 .friend-top { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .friend-top b { font-size: 15px; }
 .friend-top small { color: var(--muted); font-size: 12px; }
