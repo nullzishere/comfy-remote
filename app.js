@@ -599,22 +599,36 @@ function loraTriggers(id, x) {
 const fmtCount = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(n);
 const fmt = (x) => { const n = Number(x); return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0$/, ""); };
 
+// One file picker that stays in the page. A throwaway <input> that isn't in the document can be dropped by iPhone
+// browsers while the photo picker is open, so tapping the checkmark never reaches the page and nothing uploads.
+const PICKER = h("input", { type: "file", accept: "image/*", "aria-hidden": "true", tabindex: "-1", style: "position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0" });
+document.body.append(PICKER);
+let pickerHandler = null;
+const pickerChanged = async () => {
+  const files = [...PICKER.files];
+  if (!files.length || !pickerHandler) return;
+  const run = pickerHandler; pickerHandler = null;
+  try { await run(files); }
+  finally { PICKER.value = ""; }                      // only now: clearing it earlier makes the browser drop the file
+};
+PICKER.addEventListener("change", pickerChanged);
+PICKER.addEventListener("input", pickerChanged);
 function slotEl(name, onChange, num = null, isAdd = false, room = 1) {
   const slot = h("div", { class: "slot" + (name ? " filled" : "") + (isAdd ? " slot-add" : ""), role: "button", tabindex: "0", "aria-label": name ? "Change picture" : "Add picture" });
   const pickFile = () => {
-    const inp = h("input", { type: "file", accept: "image/*", multiple: isAdd && room > 1 });
-    inp.addEventListener("change", async () => {
-      const files = [...inp.files].slice(0, room); if (!files.length) return;
+    PICKER.multiple = isAdd && room > 1;
+    pickerHandler = async (picked) => {
+      const files = picked.slice(0, room);
       slot.replaceChildren(h("span", { class: "spin" }));
       for (const file of files) {
         try {
-          const fd = new FormData(); fd.append("image", file);
+          const fd = new FormData(); fd.append("image", file, file.name || "photo.jpg");
           const r = await api("/api/upload", { form: fd });
           onChange(r.name);
         } catch (e) { toast(e.message); renderForm(); return; }
       }
-    });
-    inp.click();
+    };
+    PICKER.click();
   };
   slot.addEventListener("click", (e) => { if (!e.target.closest(".x")) pickFile(); });
   slot.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickFile(); } });
