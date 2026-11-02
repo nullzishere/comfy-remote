@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b0a12">
 <meta name="robots" content="noindex, nofollow">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://*.trycloudflare.com; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://*.trycloudflare.com; img-src 'self' blob: data: https://*.trycloudflare.com; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'self'">
 <meta name="referrer" content="no-referrer">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -195,6 +195,12 @@
     <button class="btn" id="viewer-use" type="button">Use as photo</button>
     <button class="btn" id="viewer-reuse" type="button">Reuse settings</button>
   </div>
+</div>
+
+<div class="savesheet" id="savesheet" hidden>
+  <div class="savesheet-top"><button class="icon-btn" type="button" id="savesheet-close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+  <img id="savesheet-img" alt="Your image">
+  <p class="savesheet-hint"><b>Press and hold the image</b>, then tap <b>Save to Photos</b>.</p>
 </div>
 
 <div class="toast" id="toast" role="status" hidden></div>

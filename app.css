@@ -540,3 +540,10 @@ textarea.flash { animation: flash 1.2s ease-out; }
 .lib-item:hover .lib-cap, .lib-item:focus-visible .lib-cap { opacity: 1; }
 @media (hover: none) { .lib-cap { opacity: 1; padding-top: 16px; } }
 @media (max-width: 600px) { .admin-tabs { margin-left: 8px; } .admin-tabs button { padding: 6px 8px; font-size: 12px; } #admin .sheet-head h2 { display: none; } }
+
+/* phone Save fallback: the real image, ready for press-and-hold -> Save to Photos */
+.savesheet { position: fixed; inset: 0; z-index: 60; background: rgba(var(--bg-rgb), .97); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+.savesheet-top { padding: max(8px, env(safe-area-inset-top)) 12px 4px; }
+.savesheet img { justify-self: center; align-self: center; max-width: calc(100% - 24px); max-height: 100%; object-fit: contain; border-radius: 10px;
+  -webkit-touch-callout: default; user-select: auto; -webkit-user-select: auto; }
+.savesheet-hint { margin: 12px 16px max(18px, env(safe-area-inset-bottom)); text-align: center; font-size: 15px; }

@@ -837,7 +837,19 @@ function show() {
   }
 }
 // Phones and tablets: Save opens the system share sheet (iPhone: "Save Image" puts it in Photos) instead of a download.
-const SHARE_SAVE = !!(navigator.canShare && navigator.share) && matchMedia("(pointer: coarse)").matches;
+// Where that isn't available (some in-app/Chrome builds), a press-and-hold screen with the real image does the job.
+const TOUCH = matchMedia("(pointer: coarse)").matches;
+const SHARE_SAVE = TOUCH && !!navigator.share;
+async function pressHoldSave(it) {
+  const img = $("#savesheet-img");
+  img.removeAttribute("src");
+  $("#savesheet").hidden = false;
+  try {
+    const r = await api(`/api/image/${it.id}/${it.idx}?link=1`);
+    img.src = API + r.path;                           // a real link, so the long-press menu offers Save to Photos
+  } catch (e) { toast(e.message); $("#savesheet").hidden = true; }
+}
+$("#savesheet-close").addEventListener("click", () => { $("#savesheet").hidden = true; });
 const step = (d) => { V.i = Math.min(V.list.length - 1, Math.max(0, V.i + d)); show(); };
 $("#viewer-prev").addEventListener("click", () => step(-1));
 $("#viewer-next").addEventListener("click", () => step(1));
@@ -849,16 +861,21 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "ArrowLeft") step(-1); else if (e.key === "ArrowRight") step(1); else if (e.key === "Escape") $("#viewer").hidden = true;
 });
 $("#viewer-download").addEventListener("click", async (e) => {
+  const it = V.list[V.i];
+  if (TOUCH && (!SHARE_SAVE || !V.file || (navigator.canShare && !navigator.canShare({ files: [V.file] })))) {
+    e.preventDefault();
+    pressHoldSave(it);
+    return;
+  }
   if (SHARE_SAVE) {
     e.preventDefault();
-    if (!V.file) { toast("Getting the full image… tap Save again in a second"); return; }
-    if (!navigator.canShare({ files: [V.file] })) { toast("This browser can't save it to Photos. Long-press the image instead."); return; }
-    navigator.share({ files: [V.file] }).catch((err) => { if (err.name !== "AbortError") toast("Couldn't open the share sheet. Long-press the image instead."); });
-    return;                                           // called straight from the tap, so iOS allows the share sheet
+    try {                                             // called straight from the tap, so iOS allows the share sheet
+      navigator.share({ files: [V.file] }).catch((err) => { if (err.name !== "AbortError") pressHoldSave(it); });
+    } catch { pressHoldSave(it); }
+    return;
   }
   if (!ON_PAGES) return;
   e.preventDefault();
-  const it = V.list[V.i];
   try {
     const r = await authFetch(`/api/image/${it.id}/${it.idx}?download=1`);
     const name = (/filename="([^"]+)"/.exec(r.headers.get("Content-Disposition") || "") || [])[1] || "comfy.png";
