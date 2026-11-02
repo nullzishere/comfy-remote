@@ -109,7 +109,7 @@ function saveValues() {
   const v = { ...values[wf] };
   store.set("values." + wf, v);
 }
-const visible = (f, v) => Object.entries(f.show || {}).every(([k, vals]) => vals.includes(String(v[k])));
+const visible = (f, v) => Object.entries(f.show || {}).every(([k, vals]) => vals.map(String).includes(String(v[k])));
 const pick = (f, key, v) => (f[key + "_by"] && f[key + "_by"].mode && f[key + "_by"].mode[v.mode]) || f[key];
 
 /* ------------------------------------------------------------ form rendering */
@@ -142,10 +142,7 @@ function renderForm() {
     det.addEventListener("toggle", () => store.set("open." + wf + "." + g, det.open));
     form.append(det);
   }
-  if (groups.advanced) {
-    $(".group[data-group=advanced] .group-body", form)?.append(
-      h("button", { class: "btn ghost", type: "button", onclick: () => { values[wf] = { ...defaults(wf), ...pickUploads(values[wf]) }; saveValues(); renderForm(); toast("Settings reset"); } }, "Reset all settings to your workflow's defaults"));
-  }
+  form.append(h("button", { class: "btn ghost", type: "button", onclick: () => { values[wf] = { ...defaults(wf), ...pickUploads(values[wf]) }; saveValues(); renderForm(); toast("Settings reset"); } }, "Reset all settings to your workflow's defaults"));
 }
 function pickUploads(v) { const o = {}; for (const f of S.workflows[wf].fields) if (f.type === "image" || f.type === "images") o[f.id] = v[f.id]; return o; }
 function activeCount(g, fields, v) {
@@ -226,7 +223,8 @@ function fieldEl(f, v) {
       const cb = h("input", { type: "checkbox", checked: !!x.on });
       cb.addEventListener("change", () => set(f.id, { ...values[wf][f.id], on: cb.checked }, true));
       const sel = h("select", { class: "input", "aria-label": label + " file" });
-      const names = S.loras.length ? S.loras : [x.name];
+      const avail = S.workflows[wf].loras || [];
+      const names = avail.length ? avail : [x.name];
       for (const n of names) sel.append(h("option", { value: n, selected: n === x.name }, n.replace(/\.safetensors$/, "")));
       sel.addEventListener("change", () => set(f.id, { ...values[wf][f.id], name: sel.value }));
       const st = h("input", { class: "input", type: "number", step: "0.05", min: "-2", max: "2", value: x.strength, inputmode: "decimal", "aria-label": label + " strength" });
@@ -234,6 +232,13 @@ function fieldEl(f, v) {
       return h("div", { class: "lora" + (x.on ? "" : " off") },
         h("label", { class: "toggle-row" }, h("span", { class: "txt" }, h("b", {}, label)), cb, h("span", { class: "switch" })),
         h("div", { class: "lora-body" }, sel, st));
+    }
+    case "select": {
+      const sel = h("select", { class: "input", "aria-label": label });
+      const opts = f.options && f.options.length ? f.options : [v[f.id]];
+      for (const o of opts) sel.append(h("option", { value: o, selected: o === v[f.id] }, String(o).replace(/\.(safetensors|pth|ckpt)$/, "")));
+      sel.addEventListener("change", () => set(f.id, sel.value));
+      return wrap(sel);
     }
     case "seed": {
       const inp = h("input", { class: "input", type: "text", inputmode: "numeric", placeholder: "Random", value: v[f.id] ?? "" });
@@ -576,6 +581,6 @@ async function boot() {
   for (const w of Object.keys(S.workflows)) values[w] = loadValues(w);
   $("#login").hidden = true; $("#app").hidden = false;
   renderTabs(); renderForm(); loadRecent(); poll();
-  if (!S.loras.length) setTimeout(async () => { try { const s2 = await api("/api/schema"); if (s2.loras.length) { S.loras = s2.loras; renderForm(); } } catch { /* later */ } }, 5000);
+  if (!Object.values(S.workflows).some((w) => (w.loras || []).length)) setTimeout(async () => { try { S = await api("/api/schema"); renderForm(); } catch { /* later */ } }, 5000);
 }
 boot().catch(showDown);
