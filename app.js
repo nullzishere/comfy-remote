@@ -313,10 +313,13 @@ function applyAddons(f) {
   const dflt = defaults(wf);
   for (const [k, val] of Object.entries((o && o.set) || {})) {
     if (k === "mode" && v.mode !== val) toast("Switched to “Edit a photo”: add the photo to change");
-    if (k === "speed" && v.speed !== val) toast("Turbo is off: the NSFW add-on needs normal speed");
+    if (k === "speed" && v.speed !== val) toast("Turbo is off: NSFW and Turbo don't work together");
     v[k] = val === "default" ? dflt[k] : val;
   }
-  if (f.id === "speed" && v.speed === "turbo" && v.nsfw && v.nsfw !== "off") toast("Heads up: the NSFW add-on looks bad with Turbo's sampler");
+  if (f.id === "speed" && v.speed === "turbo" && v.nsfw && v.nsfw !== "off") {   // the two LoRAs are incompatible
+    v.nsfw = "off";
+    toast("NSFW is off: NSFW and Turbo don't work together");
+  }
   const key = "addon." + wf, before = store.get(key, []), now = addonTags(v);
   v.prompt = editTags(v.prompt, before, now);
   store.set(key, now);
