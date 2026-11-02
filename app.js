@@ -126,6 +126,14 @@ function renderTabs() {
 }
 
 function renderForm() {
+  for (const f of S.workflows[wf].fields) {          // LoRAs already on (workflow defaults) get their trigger words once
+    const x = values[wf][f.id];
+    if (f.type === "lora" && x && x.on && !Array.isArray(x.added) && (S.workflows[wf].lora_tags || {})[x.name]) {
+      x.added = loraWants(x);
+      values[wf].prompt = editTags(values[wf].prompt, [], x.added);
+      saveValues();
+    }
+  }
   const v = values[wf], form = $("#form");
   const open = new Set([...form.querySelectorAll("details[open]")].map((d) => d.dataset.group));
   form.replaceChildren();
@@ -188,7 +196,7 @@ function fieldEl(f, v) {
       const upd = () => { counter.textContent = ta.value.length > f.max * 0.8 ? `${ta.value.length}/${f.max}` : ""; };
       ta.addEventListener("input", () => { set(f.id, ta.value); upd(); }); upd();
       const el = wrap(h("div", { class: "textarea-wrap" }, ta, counter));
-      if (wf === "anime" && f.id === "prompt") el.append(tagger(ta));   // Illustrious wants Danbooru tags
+      if (wf === "anime" && f.id === "prompt") el.append(ratingRow(ta), tagger(ta));   // Illustrious wants Danbooru tags
       return el;
     }
     case "image": {
@@ -226,17 +234,17 @@ function fieldEl(f, v) {
     case "lora": {
       const x = v[f.id] || { on: false, name: "", strength: 1 };
       const cb = h("input", { type: "checkbox", checked: !!x.on });
-      cb.addEventListener("change", () => set(f.id, { ...values[wf][f.id], on: cb.checked }, true));
+      cb.addEventListener("change", () => setLora(f.id, { on: cb.checked }));
       const sel = h("select", { class: "input", "aria-label": label + " file" });
       const avail = S.workflows[wf].loras || [];
       const names = avail.length ? avail : [x.name];
       for (const n of names) sel.append(h("option", { value: n, selected: n === x.name }, n.replace(/\.safetensors$/, "")));
-      sel.addEventListener("change", () => set(f.id, { ...values[wf][f.id], name: sel.value }));
+      sel.addEventListener("change", () => setLora(f.id, { name: sel.value, pick: {} }));
       const st = h("input", { class: "input", type: "number", step: "0.05", min: "-2", max: "2", value: x.strength, inputmode: "decimal", "aria-label": label + " strength" });
       st.addEventListener("change", () => set(f.id, { ...values[wf][f.id], strength: Number(st.value) }));
       return h("div", { class: "lora" + (x.on ? "" : " off") },
         h("label", { class: "toggle-row" }, h("span", { class: "txt" }, h("b", {}, label)), cb, h("span", { class: "switch" })),
-        h("div", { class: "lora-body" }, sel, st));
+        h("div", { class: "lora-body" }, sel, st), x.on ? loraTriggers(f.id, x) : null);
     }
     case "select": {
       const sel = h("select", { class: "input", "aria-label": label });
@@ -297,7 +305,7 @@ function tagger(ta) {
         h("p", { class: "hint" }, "Tap a tag to leave it out. Dashed ones aren't standard tags."), chips,
         h("label", { class: "tg-q" }, quality, h("span", {}, "Start with quality tags")),
         h("div", { class: "row-btns" },
-          h("button", { class: "btn primary", type: "button", onclick: () => { const keep = r.tags.map((x) => x.tag).filter((t) => picked.includes(t)); write([...(quality.checked ? splitTags(QUALITY_TAGS) : []), ...keep]); toast("Prompt replaced with tags"); } }, "Use as my prompt"),
+          h("button", { class: "btn primary", type: "button", onclick: () => { const keep = r.tags.map((x) => x.tag).filter((t) => picked.includes(t)); write([...(quality.checked ? splitTags(QUALITY_TAGS) : []), ...keep]); write(splitTags(editTags(ta.value, [], activeTriggers()))); toast("Prompt replaced with tags"); } }, "Use as my prompt"),
           h("button", { class: "btn", type: "button", onclick: () => { addTags(r.tags.map((x) => x.tag).filter((t) => picked.includes(t))); toast("Tags added"); } }, "Add to my prompt")));
       result.hidden = false;
     } catch (e) { toast(e.message); }
@@ -340,6 +348,66 @@ function tagger(ta) {
       h("div", { class: "tg-sec" }, h("span", { class: "field-label" }, "Quick picks"), picks)));
   det.addEventListener("toggle", () => store.set("tagger.open", det.open));
   return det;
+}
+/* Tags the app writes into the prompt for you go right after the quality tags at the start, and come back out
+   cleanly: rating tags, and each LoRA's trigger words (x.added remembers which ones that LoRA put there). */
+const RATINGS = [["Any", []], ["General", ["general"]], ["Sensitive", ["sensitive"]], ["NSFW", ["nsfw"]], ["Explicit", ["nsfw", "explicit"]]];
+const RATING_TAGS = ["general", "sensitive", "questionable", "nsfw", "explicit"];
+const LEAD = new Set([...splitTags(QUALITY_TAGS), "newest", "highres", ...RATING_TAGS]);
+function editTags(s, remove, add) {
+  let parts = (s || "").split(",");
+  if (parts.length === 1 && !parts[0].trim()) parts = [];
+  const rm = new Set(remove.map((t) => t.toLowerCase()));
+  parts = parts.filter((p) => !rm.has(p.trim().toLowerCase()));
+  const have = new Set(parts.map((p) => p.trim().toLowerCase()));
+  let i = 0;
+  while (i < parts.length && LEAD.has(parts[i].trim().toLowerCase())) i++;
+  parts.splice(i, 0, ...add.filter((t) => !have.has(t.toLowerCase())).map((t) => " " + t));
+  return parts.map((p) => (/^\s/.test(p) ? p : " " + p)).join(",").replace(/^\s+/, "");
+}
+function ratingRow(ta) {
+  const row = h("div", { class: "rating", role: "radiogroup", "aria-label": "Rating" }, h("span", { class: "field-label" }, "Rating"));
+  const btns = RATINGS.map(([name, tags]) => {
+    const b = h("button", { type: "button", class: "tg-chip", role: "radio" }, name);
+    b.onclick = () => { ta.value = editTags(ta.value, RATING_TAGS, tags); ta.dispatchEvent(new Event("input")); };
+    row.append(b);
+    return b;
+  });
+  const refresh = () => {
+    const have = new Set(splitTags(ta.value).map((t) => t.toLowerCase()));
+    const cur = have.has("explicit") ? 4 : have.has("nsfw") ? 3 : have.has("sensitive") ? 2 : have.has("general") ? 1 : 0;
+    btns.forEach((b, i) => b.setAttribute("aria-checked", String(i === cur)));
+  };
+  ta.addEventListener("input", refresh); refresh();
+  return row;
+}
+function loraWants(x) {
+  const info = x.on && (S.workflows[wf].lora_tags || {})[x.name];
+  return info ? [...info.always, ...Object.values(x.pick || {}).flat()] : [];
+}
+function activeTriggers() {
+  return S.workflows[wf].fields.filter((f) => f.type === "lora").flatMap((f) => loraWants(values[wf][f.id] || {}));
+}
+function setLora(id, change) {
+  const old = values[wf][id] || {}, x = { ...old, ...change };
+  x.added = loraWants(x);
+  values[wf].prompt = editTags(values[wf].prompt, old.added || [], x.added);     // re-added in order: trigger first
+  set(id, x, true);
+}
+function loraTriggers(id, x) {
+  const info = (S.workflows[wf].lora_tags || {})[x.name];
+  if (!info) return null;
+  const pick = x.pick || {};
+  const choose = (g, t) => {
+    const cur = pick[g.label] || [];
+    const next = g.one ? (cur.includes(t) || !t ? [] : [t]) : cur.includes(t) ? cur.filter((y) => y !== t) : [...cur, t];
+    setLora(id, { pick: { ...pick, [g.label]: next } });
+  };
+  return h("div", { class: "lora-trig" },
+    info.always.length ? h("p", { class: "hint" }, "Adds to your prompt: ", h("b", {}, info.always.join(", "))) : null,
+    ...info.groups.map((g) => h("div", { class: "tg-lane" }, h("b", {}, g.label),
+      g.one ? h("button", { type: "button", class: "tg-chip", "aria-pressed": String(!(pick[g.label] || []).length), onclick: () => choose(g, null) }, "Any") : null,
+      ...g.tags.map((t) => h("button", { type: "button", class: "tg-chip", "aria-pressed": String((pick[g.label] || []).includes(t)), onclick: () => choose(g, t) }, t)))));
 }
 const fmtCount = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(n);
 const fmt = (x) => { const n = Number(x); return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0$/, ""); };
