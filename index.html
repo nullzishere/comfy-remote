@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e0f13">
+<meta name="robots" content="noindex, nofollow">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://*.trycloudflare.com; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'self'">
+<meta name="referrer" content="no-referrer">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Comfy Remote</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="login" class="login" hidden>
+  <form class="login-card" id="login-form" autocomplete="on">
+    <img src="icon.svg" alt="" class="login-logo">
+    <h1>Comfy Remote</h1>
+    <p class="muted">Your PC's image studio, from anywhere.</p>
+    <input type="text" name="username" value="comfy" autocomplete="username" hidden>
+    <label class="field-label" for="pw">Password</label>
+    <input id="pw" type="password" class="input" autocomplete="current-password" required autofocus>
+    <label class="check"><input type="checkbox" id="remember" checked> <span>Keep me signed in on this device</span></label>
+    <button class="btn primary big" type="submit">Sign in</button>
+    <p class="error" id="login-error" role="alert"></p>
+  </form>
+</div>
+
+<div id="down" class="login" hidden>
+  <div class="login-card">
+    <img src="icon.svg" alt="" class="login-logo">
+    <h1>PC is offline</h1>
+    <p class="muted">The PC that runs Comfy Remote is off or restarting. When it's back, this page reconnects by itself within a minute or two.</p>
+    <button class="btn primary big" id="retry" type="button">Try again</button>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <header class="topbar">
+    <div class="brand"><img src="icon.svg" alt=""><span>Comfy Remote</span></div>
+    <button class="status" id="status" type="button"><i></i><span>Connecting…</span></button>
+    <button class="icon-btn" id="open-gallery" type="button" aria-label="Gallery">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>
+    </button>
+    <button class="icon-btn" id="open-settings" type="button" aria-label="Settings">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+  </header>
+
+  <div class="offline-banner" id="offline" hidden>
+    <div><b>ComfyUI isn't running on your PC.</b><span class="muted" id="offline-sub">Start it to generate images.</span></div>
+    <button class="btn primary" id="start-comfy" type="button">Start ComfyUI</button>
+  </div>
+
+  <div class="layout">
+    <section class="studio">
+      <nav class="tabs" id="tabs" role="tablist"></nav>
+      <form id="form" class="form" novalidate></form>
+      <div class="generate-bar">
+        <p class="error" id="gen-error" role="alert"></p>
+        <button class="btn primary big" id="generate" type="button">
+          <svg viewBox="0 0 24 24"><path d="M12 2l2.4 6.3L21 9l-5 4.4L17.5 21 12 17.3 6.5 21 8 13.4 3 9l6.6-.7z"/></svg>
+          <span>Generate</span>
+        </button>
+      </div>
+    </section>
+    <section class="results">
+      <h2 class="section-title">Now</h2>
+      <div id="jobs" class="jobs"><p class="empty muted">Your images will show up here.</p></div>
+      <div class="recent-head"><h2 class="section-title">Recent</h2><button class="link" id="see-all" type="button">See all</button></div>
+      <div id="recent" class="grid"></div>
+    </section>
+  </div>
+</div>
+
+<div class="sheet" id="gallery" hidden>
+  <div class="sheet-head"><h2>Gallery</h2><button class="icon-btn close" type="button" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+  <div class="sheet-body"><div id="gallery-grid" class="grid"></div><button class="btn ghost wide" id="gallery-more" type="button" hidden>Load more</button></div>
+</div>
+
+<div class="sheet" id="settings" hidden>
+  <div class="sheet-head"><h2>Settings</h2><button class="icon-btn close" type="button" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+  <div class="sheet-body">
+    <div class="card">
+      <h3>Your PC</h3>
+      <p class="muted" id="settings-status"></p>
+      <div class="row-btns">
+        <button class="btn" id="settings-start" type="button">Start ComfyUI</button>
+        <button class="btn" id="settings-free" type="button">Free GPU memory</button>
+      </div>
+    </div>
+    <form class="card" id="pw-form">
+      <h3>Change password</h3>
+      <input type="text" autocomplete="username" value="comfy" hidden>
+      <label class="field-label" for="pw-old">Current password</label>
+      <input class="input" id="pw-old" type="password" autocomplete="current-password" required>
+      <label class="field-label" for="pw-new">New password <span class="muted">(12+ characters)</span></label>
+      <input class="input" id="pw-new" type="password" autocomplete="new-password" minlength="12" required>
+      <button class="btn primary" type="submit">Change password</button>
+      <p class="note" id="pw-msg" role="status"></p>
+    </form>
+    <div class="card">
+      <h3>Sign out</h3>
+      <div class="row-btns">
+        <button class="btn" id="logout" type="button">Sign out here</button>
+        <button class="btn danger" id="logout-all" type="button">Sign out everywhere</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="viewer" id="viewer" hidden>
+  <div class="viewer-top">
+    <button class="icon-btn" type="button" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <span id="viewer-count" class="muted"></span>
+  </div>
+  <div class="viewer-stage">
+    <button class="nav prev" id="viewer-prev" type="button" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <img id="viewer-img" alt="Generated image">
+    <button class="nav next" id="viewer-next" type="button" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+  </div>
+  <p class="viewer-caption" id="viewer-caption"></p>
+  <div class="viewer-actions">
+    <a class="btn" id="viewer-download" download>Save</a>
+    <button class="btn" id="viewer-use" type="button">Use as photo</button>
+    <button class="btn" id="viewer-reuse" type="button">Reuse settings</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>
