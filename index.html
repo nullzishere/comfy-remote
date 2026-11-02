@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0e0f13">
+<meta name="theme-color" content="#0b0a12">
 <meta name="robots" content="noindex, nofollow">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://*.trycloudflare.com; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'self'">
 <meta name="referrer" content="no-referrer">
@@ -42,7 +42,7 @@
 
 <div id="app" hidden>
   <header class="topbar">
-    <div class="brand"><img src="icon.svg" alt=""><span>Comfy Remote</span></div>
+    <div class="brand"><img src="icon.svg" alt=""><span>comfy/remote</span></div>
     <button class="status" id="status" type="button"><i></i><span>Connecting…</span></button>
     <button class="icon-btn" id="open-gallery" type="button" aria-label="Gallery">
       <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>
@@ -71,7 +71,15 @@
       </div>
     </section>
     <section class="results">
-      <h2 class="section-title">Now</h2>
+      <div class="stage" id="stage" hidden>
+        <button class="stage-in" id="stage-in" type="button" aria-label="Your latest image">
+          <canvas id="stage-cv"></canvas>
+          <div class="stage-center" id="stage-center"><div class="stage-pct" id="stage-pct">0%</div><div class="stage-sub" id="stage-sub"></div></div>
+          <span class="stage-chip"><i></i><span id="stage-step"></span></span>
+        </button>
+      </div>
+      <p class="stage-cap" id="stage-cap" hidden></p>
+      <h2 class="section-title">Queue</h2>
       <div id="jobs" class="jobs"><p class="empty muted">Your images will show up here.</p></div>
       <div class="recent-head"><h2 class="section-title">Recent</h2><button class="link" id="see-all" type="button">See all</button></div>
       <div id="recent" class="grid"></div>

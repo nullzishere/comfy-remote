@@ -96,6 +96,8 @@ const values = {};           // per workflow
 let state = { online: false, jobs: [] };
 const seenDone = new Set();
 let firstPoll = true;
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const ease = (t) => 1 - Math.pow(1 - t, 3);
 let ME = { name: "", role: "owner" };            // jobs that were already done when the page opened don't buzz
 
 function defaults(w) { const o = {}; for (const f of S.workflows[w].fields) o[f.id] = structuredClone(f.default); return o; }
@@ -115,6 +117,7 @@ const pick = (f, key, v) => (f[key + "_by"] && f[key + "_by"].mode && f[key + "_
 /* ------------------------------------------------------------ form rendering */
 function renderTabs() {
   const tabs = $("#tabs"); tabs.replaceChildren();
+  tabs.style.setProperty("--i", Object.keys(S.workflows).indexOf(wf));   // slides the glow under the active tab
   for (const [id, w] of Object.entries(S.workflows)) {
     tabs.append(h("button", { class: "tab", type: "button", role: "tab", "aria-selected": String(id === wf),
       onclick: () => { wf = id; store.set("wf", wf); renderTabs(); renderForm(); } },
@@ -289,7 +292,7 @@ $("#generate").addEventListener("click", async () => {
     await api("/api/generate", { json: { workflow: wf, values: v } });
     if (navigator.vibrate) navigator.vibrate(15);
     await poll(true);
-    if (innerWidth < 960) $(".results").scrollIntoView({ behavior: "smooth", block: "start" });
+    if (innerWidth < 960) $("#stage").scrollIntoView({ behavior: REDUCED ? "auto" : "smooth", block: "center" });
   } catch (e) { $("#gen-error").textContent = e.message; }
   btn.disabled = false;
 });
@@ -331,6 +334,7 @@ const jobCards = new Map();
 function renderJobs() {
   const box = $("#jobs");
   const jobs = (state.jobs || []).filter((j) => j.status !== "cancelled" || Date.now() / 1000 - (j.finished || 0) < 20).slice().reverse().slice(0, 6);
+  renderStage();
   if (!jobs.length) { box.replaceChildren(h("p", { class: "empty muted" }, "Your images will show up here.")); jobCards.clear(); return; }
   const keep = new Set();
   for (const j of jobs) {
@@ -396,6 +400,88 @@ function updateJobCard(card, j) {
     acts.push(strip);
   }
   if (card._actKey !== j.status + j.images) { card._actKey = j.status + j.images; card._actions.replaceChildren(...acts); }
+}
+/* ------------------------------------------------------------ render stage
+   The latest job gets the big frame: a halo ring spins round it while the PC works, the live preview is drawn
+   blocky at early sampler steps and sharper as they climb, and the finished image resolves step by step. */
+const STAGE = { id: null, done: false, busy: false, steps: 25, frac: 0 };
+const PHASE = { detail: "FIXING DETAILS", upscale: "UPSCALING", decode: "DECODING", think: "REWRITING PROMPT", work: "WORKING" };
+async function loadBitmap(path) {
+  const r = await authFetch(path);
+  if (!r.ok) throw new Error("image");
+  const blob = await r.blob();
+  if (window.createImageBitmap) return createImageBitmap(blob);
+  const im = new Image(), url = URL.createObjectURL(blob);
+  await new Promise((ok, no) => { im.onload = ok; im.onerror = no; im.src = url; });
+  return im;
+}
+function drawStep(img, frac) {
+  const cv = $("#stage-cv"), box = $("#stage-in"), dpr = devicePixelRatio || 1;
+  const W = Math.round(box.clientWidth * dpr), H = Math.round(box.clientHeight * dpr);
+  if (!W || !H) return;
+  if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+  const cx = cv.getContext("2d"), tar = W / H, iw = img.width, ih = img.height;
+  let sw = iw, sh = ih, sx = 0, sy = 0;
+  if (iw / ih > tar) { sw = ih * tar; sx = (iw - sw) / 2; } else { sh = iw / tar; sy = (ih - sh) / 2; }
+  if (frac >= 1) { cx.imageSmoothingEnabled = true; cx.drawImage(img, sx, sy, sw, sh, 0, 0, W, H); return; }
+  const res = Math.max(6, Math.round(W * Math.pow(Math.max(0.02, frac), 2.2)));
+  const tmp = drawStep.tmp || (drawStep.tmp = document.createElement("canvas"));
+  tmp.width = res; tmp.height = Math.max(6, Math.round(res / tar));
+  tmp.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, tmp.width, tmp.height);
+  cx.imageSmoothingEnabled = false; cx.clearRect(0, 0, W, H); cx.drawImage(tmp, 0, 0, W, H);
+}
+function renderStage() {
+  const jobs = state.jobs || [], j = jobs[jobs.length - 1];
+  const st = $("#stage"), cap = $("#stage-cap"), center = $("#stage-center"), stepEl = $("#stage-step");
+  if (!j || j.status === "cancelled") { st.hidden = cap.hidden = true; return; }
+  st.hidden = cap.hidden = false;
+  if (STAGE.id !== j.id) {
+    STAGE.id = j.id; STAGE.done = false; STAGE.frac = 0; STAGE.steps = 0;
+    const cv = $("#stage-cv"); cv.getContext("2d").clearRect(0, 0, cv.width, cv.height);
+    center.hidden = false;
+  }
+  cap.replaceChildren(h("b", {}, (S.workflows[j.workflow] || {}).label || j.workflow), " · ", j.by ? `${j.by} · ` : "", j.summary || "");
+  const active = j.status === "queued" || j.status === "running";
+  st.classList.toggle("busy", active);
+  st.classList.toggle("done", j.status === "done");
+  $("#stage-in").onclick = j.status === "done" ? () => openViewer([{ id: j.id, n: j.images, summary: j.summary, workflow: j.workflow, by: j.by }], 0) : null;
+  if (active) {
+    const steps = j.step && j.step[1] ? j.step : null, sampling = j.phase === "sample";
+    if (steps && sampling) STAGE.steps = Math.max(STAGE.steps, steps[1]);   // the main pass has the most steps
+    // the preview only ever gets sharper: later passes (upscale, refine, detailers) don't make it blocky again
+    STAGE.frac = Math.max(STAGE.frac, sampling && steps ? steps[0] / steps[1] : STAGE.frac > 0 ? 1 : 0);
+    $("#stage-pct").textContent = j.status === "queued" ? (j.ahead ? `${j.ahead} ahead` : "Starting") : `${Math.round((j.progress || 0) * 100)}%`;
+    $("#stage-sub").textContent = j.status === "queued" ? "Waiting for your PC" : "Rendering on your PC";
+    stepEl.textContent = j.status === "queued" ? "QUEUED" : sampling && steps ? `STEP ${steps[0]}/${steps[1]}`
+      : j.phase === "detail" && steps ? `${PHASE.detail} ${steps[0]}/${steps[1]}` : PHASE[j.phase] || PHASE.work;
+    if (j.has_preview && !STAGE.busy) {
+      STAGE.busy = true;
+      loadBitmap(`/api/preview/${j.id}?t=${Date.now()}`).then((im) => {
+        if (STAGE.id !== j.id || STAGE.done) return;
+        center.hidden = true;
+        drawStep(im, STAGE.frac || 1);
+      }).catch(() => {}).finally(() => (STAGE.busy = false));
+    }
+  } else if (j.status === "done" && !STAGE.done) {
+    STAGE.done = true;
+    stepEl.textContent = "RESOLVING";
+    loadBitmap(`/api/image/${j.id}/0?thumb=1`).then((im) => {
+      if (STAGE.id !== j.id) return;
+      center.hidden = true;
+      const total = STAGE.steps || 25, t0 = performance.now(), ms = REDUCED ? 1 : 1300;
+      (function tick(t) {
+        const p = Math.min(1, (t - t0) / ms);
+        drawStep(im, p < 1 ? 0.06 + 0.94 * ease(p) : 1);
+        stepEl.textContent = p < 1 ? `STEP ${Math.max(1, Math.round(ease(p) * total))}/${total}` : "DONE · TAP TO OPEN";
+        if (p < 1) requestAnimationFrame(tick);
+      })(t0);
+    }).catch(() => (stepEl.textContent = "DONE · TAP TO OPEN"));
+  } else if (j.status === "error") {
+    center.hidden = false;
+    $("#stage-pct").textContent = "Failed";
+    $("#stage-sub").textContent = j.error || "Something went wrong.";
+    stepEl.textContent = "ERROR";
+  }
 }
 function timeAgo(ts) {
   const s = Math.max(0, Date.now() / 1000 - ts);
