@@ -238,8 +238,63 @@ function set(id, val, rerender = false) {
   values[wf][id] = val;
   const f = S.workflows[wf].fields.find((x) => x.id === id);
   if (f && (f.group === "addons" || id === "speed")) applyAddons(f);
+  if (wf === "anime" && f && (id === "prompt" || f.type === "lora")) smartSoon();
   saveValues();
   if (rerender) renderForm();
+}
+
+/* ------------------------------------------------------------ smart prompt (Anime)
+   Things to avoid follows the prompt: tags you ask for come out of it (and go back when you drop them), black & white
+   avoids colour, the rating avoids what it rules out. Only the app's own changes are tracked, so they undo cleanly.
+   The check under the prompt points out combinations that fight each other, each with a one-tap fix. */
+let NEG_TA = null, CHECKS_EL = null, smartTimer = null;
+const normTag = (t) => t.toLowerCase().replace(/\\/g, "").replace(/^\(+|\)+$/g, "").replace(/:[\d.]+$/, "").trim();
+const MONO_TAGS = new Set(["monochrome", "greyscale", "grayscale"]);
+const COLOR_WORD = /\b(red|blue|green|yellow|orange|purple|pink|aqua|cyan|teal|gold|golden|brown|blonde|colorful|colourful|neon|rainbow|multicolored|vibrant|colored)\b/;
+const EXPLICIT_WORD = /\b(nude|naked|penis|erection|testicles|pussy|sex|fellatio|cunnilingus|handjob|paizuri|masturbation|cum|ejaculation|anus|anal|vaginal|nipples|pubic hair|genitals)\b/;
+function smartSoon() { clearTimeout(smartTimer); smartTimer = setTimeout(smartNegative, 250); }
+function promptTags() { return splitTags((values.anime || {}).prompt).map(normTag); }
+function smartNegative() {
+  const v = values.anime; if (!v || typeof v.negative !== "string") return;
+  const st = store.get("negauto.anime", { added: [], dropped: [] });
+  const P = new Set(promptTags());
+  const base = editTags(editTags(v.negative, st.added, []), [], st.dropped.filter((t) => !P.has(normTag(t))));
+  const baseTags = splitTags(base);
+  const drop = baseTags.filter((t) => P.has(normTag(t)));
+  const mono = [...P].some((t) => MONO_TAGS.has(t));
+  const rating = P.has("explicit") || P.has("nsfw") ? "nsfw" : P.has("sensitive") ? "sensitive" : P.has("general") ? "general" : "";
+  const want = [...(mono ? ["color", "colorful"] : []), ...(rating === "general" ? ["nsfw", "explicit"] : rating === "sensitive" ? ["explicit"] : [])];
+  const have = new Set(baseTags.map(normTag));
+  const add = want.filter((t) => !have.has(t) && !P.has(t));
+  const neg = editTags(base, drop, add);
+  store.set("negauto.anime", { added: add, dropped: [...new Set([...drop, ...st.dropped.filter((t) => P.has(normTag(t)))])] });
+  if (neg !== v.negative) { v.negative = neg; if (NEG_TA && NEG_TA.isConnected) NEG_TA.value = neg; const keep = wf; wf = "anime"; saveValues(); wf = keep; }
+  renderChecks();
+}
+function renderChecks() {
+  if (!CHECKS_EL || !CHECKS_EL.isConnected || wf !== "anime") return;
+  const v = values.anime, raw = splitTags(v.prompt), P = raw.map(normTag), has = (t) => P.includes(t);
+  const triggers = new Set(activeTriggers().map(normTag));
+  const editPrompt = (remove, add = []) => { v.prompt = editTags(v.prompt, remove, add); saveValues(); renderForm(); smartNegative(); };
+  const issues = [];
+  const mono = P.some((t) => MONO_TAGS.has(t));
+  const colors = mono ? raw.filter((t, i) => COLOR_WORD.test(P[i]) && !triggers.has(P[i])) : [];
+  if (colors.length) issues.push(["Colour words fight black & white: " + colors.join(", "), [["Remove them", () => editPrompt(colors)]]]);
+  if (has("solo") && has("1boy") && has("1girl")) issues.push(["“solo” with both 1boy and 1girl", [["Keep 1boy", () => editPrompt(raw.filter((t, i) => P[i] === "1girl"))], ["Keep 1girl", () => editPrompt(raw.filter((t, i) => P[i] === "1boy"))], ["Drop solo", () => editPrompt(raw.filter((t, i) => P[i] === "solo"))]]]);
+  const explicit = P.some((t) => EXPLICIT_WORD.test(t));
+  if (explicit && (has("general") || has("sensitive"))) issues.push(["Explicit tags with a General/Sensitive rating", [["Switch to Explicit", () => editPrompt(raw.filter((t, i) => RATING_TAGS.includes(P[i])), ["nsfw", "explicit"])]]]);
+  for (const f of S.workflows.anime.fields.filter((f) => f.type === "lora")) {
+    const x = v[f.id] || {}, info = x.on && (S.workflows.anime.lora_tags || {})[x.name];
+    const main = info && info.always[0];
+    if (main && !has(normTag(main))) issues.push([`${(S.workflows.anime.lora_labels || {})[x.name] || x.name} is on but its trigger “${main.replace(/\\/g, "")}” isn't in the prompt`, [["Put it back", () => editPrompt([], [main])]]]);
+  }
+  const dupes = raw.filter((t, i) => P.indexOf(P[i]) !== i);
+  if (dupes.length) issues.push([`Repeated tags: ${[...new Set(dupes)].join(", ")}`, [["Remove repeats", () => { v.prompt = raw.filter((t, i) => P.indexOf(P[i]) === i).join(", "); saveValues(); renderForm(); }]]]);
+  const st = store.get("negauto.anime", { added: [], dropped: [] });
+  const auto = [st.added.length ? "avoiding " + st.added.join(", ") : null, st.dropped.length ? `not avoiding ${st.dropped.join(", ")} (it's in your prompt)` : null].filter(Boolean);
+  CHECKS_EL.replaceChildren(
+    ...issues.map(([msg, fixes]) => h("div", { class: "pcheck" }, h("span", { class: "check-ico" }, "!"), h("span", {}, msg), h("span", { class: "check-fix" }, ...fixes.map(([label, fn]) => h("button", { type: "button", class: "tg-chip", onclick: fn }, label))))),
+    auto.length ? h("div", { class: "pcheck auto" }, h("span", { class: "check-ico" }, "✓"), h("span", {}, "Things to avoid, auto: " + auto.join(" · "))) : null);
 }
 /* Realistic add-ons: picking one switches the settings it needs (o.set) and keeps its trigger words in the prompt. */
 function addonTags(v) {
@@ -299,16 +354,19 @@ function fieldEl(f, v) {
       const counter = h("span", { class: "counter" }, "");
       const upd = () => { counter.textContent = ta.value.length > f.max * 0.8 ? `${ta.value.length}/${f.max}` : ""; };
       ta.addEventListener("input", () => { set(f.id, ta.value); upd(); }); upd();
+      if (wf === "anime" && f.id === "negative") NEG_TA = ta;              // kept in step by smartNegative()
+      if (wf === "anime" && f.id === "prompt") CHECKS_EL = h("div", { class: "checks", "aria-live": "polite" });
       if (wf === "anime" && f.id === "prompt" && level() === "normal") {   // Simple: plain words first, then the tag box
         const [step1, more] = tagger(ta, true);
         ta.placeholder = "Your tags land here, e.g. 1girl, long hair, red eyes, night, rain";
+        queueMicrotask(renderChecks);
         return h("div", { class: "field guided" },
           guideStep(1, "Describe your picture", "Write it the way you'd say it. We'll turn it into tags, the words the Anime model understands."), step1,
           guideStep(2, "Your prompt", "Tags separated by commas. Edit them, add your own, or tap more below."),
-          h("div", { class: "textarea-wrap" }, ta, counter), ratingRow(ta), more);
+          h("div", { class: "textarea-wrap" }, ta, counter), ratingRow(ta), CHECKS_EL, more);
       }
       const el = wrap(h("div", { class: "textarea-wrap" }, ta, counter));
-      if (wf === "anime" && f.id === "prompt") el.append(ratingRow(ta), tagger(ta));   // Illustrious wants Danbooru tags
+      if (wf === "anime" && f.id === "prompt") { el.append(ratingRow(ta), CHECKS_EL, tagger(ta)); queueMicrotask(renderChecks); }
       return el;
     }
     case "image": {
@@ -407,7 +465,9 @@ function tagger(ta, guided = false) {
     if (!words.value.trim()) { toast("Describe the picture first"); return; }
     convert.disabled = true; convert.textContent = "Writing tags…";
     try {
-      const r = await api("/api/tagify", { json: { text: words.value } });
+      const mono = promptTags().some((t) => MONO_TAGS.has(t));    // black & white: the helper leaves colour words out
+      const r = await api("/api/tagify", { json: { text: words.value, mono } });
+      if (r.dropped && r.dropped.length) toast(`Left out for black & white: ${r.dropped.join(", ")}`);
       const chips = h("div", { class: "tg-chips" });
       let picked = r.tags.map((x) => x.tag);
       r.tags.forEach((x) => {
