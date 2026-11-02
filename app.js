@@ -824,7 +824,20 @@ function show() {
   $("#viewer-count").textContent = V.list.length > 1 ? `${V.i + 1} / ${V.list.length}` : "";
   $("#viewer-prev").hidden = V.i === 0; $("#viewer-next").hidden = V.i >= V.list.length - 1;
   $("#viewer-reuse").hidden = !it.values;
+  V.file = null;                                      // fetched ahead so Save can open the share sheet on the tap itself
+  if (SHARE_SAVE) {
+    const want = `${it.id}/${it.idx}`;
+    V.fileFor = want;
+    authFetch(`/api/image/${want}?download=1`).then(async (r) => {
+      if (!r.ok || V.fileFor !== want) return;
+      const name = (/filename="([^"]+)"/.exec(r.headers.get("Content-Disposition") || "") || [])[1] || "comfy.png";
+      const blob = await r.blob();
+      if (V.fileFor === want) V.file = new File([blob], name, { type: blob.type || "image/png" });
+    }).catch(() => {});
+  }
 }
+// Phones and tablets: Save opens the system share sheet (iPhone: "Save Image" puts it in Photos) instead of a download.
+const SHARE_SAVE = !!(navigator.canShare && navigator.share) && matchMedia("(pointer: coarse)").matches;
 const step = (d) => { V.i = Math.min(V.list.length - 1, Math.max(0, V.i + d)); show(); };
 $("#viewer-prev").addEventListener("click", () => step(-1));
 $("#viewer-next").addEventListener("click", () => step(1));
@@ -836,6 +849,13 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "ArrowLeft") step(-1); else if (e.key === "ArrowRight") step(1); else if (e.key === "Escape") $("#viewer").hidden = true;
 });
 $("#viewer-download").addEventListener("click", async (e) => {
+  if (SHARE_SAVE) {
+    e.preventDefault();
+    if (!V.file) { toast("Getting the full image… tap Save again in a second"); return; }
+    if (!navigator.canShare({ files: [V.file] })) { toast("This browser can't save it to Photos. Long-press the image instead."); return; }
+    navigator.share({ files: [V.file] }).catch((err) => { if (err.name !== "AbortError") toast("Couldn't open the share sheet. Long-press the image instead."); });
+    return;                                           // called straight from the tap, so iOS allows the share sheet
+  }
   if (!ON_PAGES) return;
   e.preventDefault();
   const it = V.list[V.i];
